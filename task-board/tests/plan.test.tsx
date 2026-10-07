@@ -1,6 +1,6 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
-import { clock, dur, elapsed, freshest, isHidden, limitNow, mainLine, modelName, percent, resetIn, ringSvg, segSvg, splitStage, stagesOf, stepLines, subsByStep } from '../hooks/plan'
+import { clock, dur, elapsed, foldSvg, freshest, isHidden, limitNow, mainLine, modelName, percent, rebaseScan, resetIn, ringSvg, segSvg, splitStage, stagesOf, stepLines, subsByStep } from '../hooks/plan'
 
 test('阶段：按 “阶段名: 步骤名” 分组，没前缀的跟上一个阶段，全无前缀 = 一个阶段', async () => {
   const g = stagesOf([
@@ -269,4 +269,191 @@ test('子代理按派它的那一步分组；Main 行写出主会话的模型，
   expect(mainLine(null, null, [sub('a')])).toBe('1 subagent this turn')
   // 分阶段后每步还记得自己在原列表里的序号
   expect(stagesOf([{ t: 'A: x', s: 'completed', sec: 1 }, { t: 'B: y', s: 'pending', sec: -1 }]).map(g => g.steps.map(x => x.i))).toEqual([[0], [1]])
+})
+
+test('手机：窄屏单栏，按钮代替点击层；展开明细、收起、隐藏、开关都能点', async ($, on) => {
+  const at = Date.now()
+  const board = {
+    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: 'C:/x/prefs.json',
+    usage: { at: at - 5000, limits: [{ kind: 'five_hour', percentUsed: 23.5, resetsAt: new Date(at + 7_980_000).toISOString() }] },
+    sessions: [
+      row('a', 'Refactor auth module', 'running', 5, {
+        done: 1, total: 3, planSec: 724, turnSec: 900, subActive: 1, model: 'claude-opus-5-5', effort: 'high',
+        steps: [
+          { t: 'Survey: Read doors', s: 'completed', sec: 130 },
+          { t: 'Renumber: Renumber 14 doors', s: 'in_progress', sec: 72 },
+          { t: 'Export: A-201', s: 'pending', sec: -1 },
+        ],
+        subs: [{ name: 'Explore', desc: 'door tags', model: 'claude-haiku-4-5-20251001', tool: 'Grep', sec: 34, active: true, calls: 7, step: 1 }],
+      }),
+      row('b', '本会话', 'running', 5, { turnSec: 200 }),
+      row('q', '等我授权的会话', 'input', 5, { done: 2, total: 5 }),
+      row('c', '做完的会话', 'done', 1320),
+      row('e', '已隐藏的会话', 'done', 600),
+    ],
+  }
+  on('state.get', async (_$, e, next) => {
+    if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'b', version: 1 } }
+    return next(e)
+  })
+  on('ui.log', async () => ({ value: undefined }))
+  on('ui.toast', async () => ({ value: undefined }))
+  on('fs.read', async () => ({ value: '{"nextSteps":false}' }))
+  const writes: string[] = []
+  on('fs.write', async (_$, e) => {
+    writes.push(String((e as { text?: unknown }).text ?? ''))
+    return { value: undefined }
+  })
+
+  const ui = await $.ui.mount({ plugin: 'task-board', surface: 'mobile', ...BAND, props: { ...BAND.props, bodyColumns: 44 } })
+  // 手机默认收起：只有一行摘要（在等我的排最前）和用量，没有卡片
+  expect(await ui.find({ key: 'm-folded' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^● 1 needs input$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^  ● 2 running$/ })).toBeDefined()
+  expect(await ui.find({ key: 'm-usage' })).toBeDefined()
+  expect(await ui.find({ key: 'm-row-a' })).toBeUndefined()
+  // 点右端的按钮展开
+  await ui.press({ key: 'm-fold' })
+  expect(await ui.find({ key: 'm-folded' })).toBeUndefined()
+  // 画的是手机布局（不是引擎的后备）：卡片、用量圆环、Current、needs input
+  expect(await ui.find({ key: 'm-row-a' })).toBeDefined()
+  expect(await ui.find({ key: 'm-usage' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ Current $/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^needs input$/ })).toBeDefined()
+  expect(await ui.find({ key: 'm-row-e' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^ · ⏱ 12:04 · 1 agent · / })).toBeDefined()
+
+  // 展开明细：阶段名单独一行，步骤、子代理、Main 行
+  await ui.press({ key: 'm-x-a' })
+  expect(await ui.find({ key: 'm-detail' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Renumber$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Renumber 14 doors$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^running 1m 12s$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /haiku 4\.5 · Grep · door tags/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^ · opus 5\.5 · high · 1 subagent this turn · 1 running$/ })).toBeDefined()
+  await ui.press({ key: 'm-collapse' })
+  expect(await ui.find({ key: 'm-detail' })).toBeUndefined()
+
+  // 隐藏做完的会话、拨开关：都写回开关文件
+  await ui.press({ key: 'm-h-c' })
+  expect(writes.length).toBe(1)
+  expect(writes[0]).toMatch(/"c": \d+/)
+  await ui.press({ key: 'm-next' })
+  expect(writes.length).toBe(2)
+  expect(writes[1]).toMatch(/"nextSteps": true/)
+  // 右下角的按钮再收起
+  await ui.press({ key: 'm-fold' })
+  expect(await ui.find({ key: 'm-folded' })).toBeDefined()
+  expect(await ui.find({ key: 'm-row-a' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('桌面：默认展开，最右下角的小箭头收起成一行，再点箭头展开', async ($, on) => {
+  const at = Date.now()
+  const board = {
+    at, tick: 1, prefs: { nextSteps: false }, prefsPath: 'C:/x/prefs.json',
+    sessions: [row('a', '在跑的会话', 'running', 5), row('q', '等我授权的会话', 'input', 5), row('c', '做完的会话', 'done', 600)],
+  }
+  on('state.get', async (_$, e, next) => {
+    if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'a', version: 1 } }
+    return next(e)
+  })
+  on('ui.log', async () => ({ value: undefined }))
+  const ui = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
+  expect(await ui.find({ key: 'row-a' })).toBeDefined()
+  // 箭头是没有文字的小图标
+  expect(await ui.find({ key: 'fold-btn' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Collapse|Show board/ })).toBeUndefined()
+  await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'hit-fold' })
+  expect(await ui.find({ key: 'row-a' })).toBeUndefined()
+  expect(await ui.find({ key: 'folded' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^   ● 1 needs input$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^   ● 1 done$/ })).toBeDefined()
+  await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'hit-fold' })
+  expect(await ui.find({ key: 'row-a' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('手机：Details 窗也能画（没有 Client，用普通按钮）', async ($, on) => {
+  const at = Date.now()
+  const board = { at, tick: 1, prefs: { nextSteps: false }, prefsPath: 'C:/x/prefs.json', sessions: [row('b', '本会话', 'running', 5), row('c', '做完的会话', 'done', 600)] }
+  on('state.get', async (_$, e, next) => {
+    if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'b', version: 1 } }
+    return next(e)
+  })
+  const ui = await $.ui.mount({
+    plugin: 'task-board', surface: 'mobile', component: 'Pane', requestId: 'task-board',
+    props: { title: 'Sessions', isFocused: false, bodyColumns: 44, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  })
+  expect(await ui.find({ type: 'Text', text: /本会话/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /做完的会话/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('共用快照：所有“过了多少秒”往后推到现在，太旧的、坏的不用', async () => {
+  const at = 1_791_000_000_000
+  const snap = {
+    at,
+    prefsPath: 'C:/p.json',
+    sessions: [
+      row('a', '在跑', 'running', 30, {
+        total: 3, done: 1, planSec: 100, turnSec: 50,
+        steps: [{ t: 'x', s: 'completed', sec: 20 }, { t: 'y', s: 'in_progress', sec: 40 }, { t: 'z', s: 'pending', sec: -1 }],
+        subs: [{ name: 'Explore', desc: '', model: '', tool: 'Read', sec: 12, active: true }, { name: 'Plan', desc: '', model: '', tool: '', sec: 9, active: false }],
+      }),
+      row('b', '做完了', 'done', -1, { total: 2, done: 2, planSec: 70, turnSec: -1 }),
+    ],
+  }
+  const got = rebaseScan(snap, at + 8_400, 600)
+  expect(got?.at).toBe(at + 8_000)
+  expect(got?.prefsPath).toBe('C:/p.json')
+  const [a, b] = got?.sessions ?? []
+  expect([a?.ageSec, a?.cacheAgeSec, a?.turnSec, a?.planSec]).toEqual([18, 38, 58, 108])
+  expect(a?.steps?.map(x => x.sec)).toEqual([20, 48, -1])
+  expect(a?.subs?.map(x => x.sec)).toEqual([20, 9])
+  // 没请求过的缓存、不知道的这一轮、做完的清单都不动
+  expect([b?.ageSec, b?.cacheAgeSec, b?.turnSec, b?.planSec]).toEqual([18, -1, -1, 70])
+  // 隐藏判断用的“最后一次请求”时间不随平移改变
+  expect((got?.at ?? 0) - (a?.cacheAgeSec ?? 0) * 1000).toBe(at - 30_000)
+  expect(rebaseScan(snap, at + 601_000, 600)).toBe(null)
+  expect(rebaseScan({ at: 0, sessions: [] }, at, 600)).toBe(null)
+  expect(rebaseScan(null, at, 600)).toBe(null)
+  expect(rebaseScan({ at, sessions: 'x' }, at, 600)).toBe(null)
+})
+
+test('新会话：一启动就用共用快照填上任务板，不等扫描进程', async ($, on) => {
+  const at = 1_791_000_000_000
+  const reads: string[] = []
+  mock.env(on, { USERPROFILE: 'C:\\Users\\u' })
+  on('fs.read', async (_$, e) => {
+    reads.push(e.path)
+    return { value: JSON.stringify({ at, sessions: [row('a', '别的会话', 'done', 30)], prefsPath: 'C:/p.json' }) }
+  })
+  const clock = mock.clock(on, { now: at + 5_000 })
+  on('session.surfaces', async () => ({ value: [] }))
+  on('session.id', async () => ({ value: 'me' }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  const boards: { at: number; sessions: { title: string; cacheAgeSec: number }[] }[] = []
+  on('state.set', async (_$, e, next) => {
+    if (e.plugin === 'task-board' && e.key === 'board') boards.push(e.value as (typeof boards)[number])
+    return next(e)
+  })
+  await $.session.start({ cwd: 'C:\\w', surface: null, isInteractive: false })
+  // 读快照是放到后台做的（不拖住会话启动），等它落地
+  await clock.settle()
+  expect(reads.map(p => p.replace(/\\/g, '/'))).toContain('C:/Users/u/.claude/task-board-snapshot.json')
+  const b = boards.at(-1)
+  expect(b?.at).toBe(at + 5_000)
+  expect(b?.sessions.map(s => [s.title, s.cacheAgeSec])).toEqual([['别的会话', 35]])
+})
+
+test('收起箭头：灰色细线、不填底色；展开时向下、收起时向上', async () => {
+  expect(foldSvg(false)).toMatch(/M7.5 9.25 11 12.75/)
+  expect(foldSvg(true)).toMatch(/M7.5 12.75 11 9.25/)
+  expect(foldSvg(false)).not.toMatch(/<rect/)
+  expect(foldSvg(true)).toMatch(/fill="none" stroke="#8a877f"/)
 })

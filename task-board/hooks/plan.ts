@@ -1,6 +1,6 @@
 // 任务板明细用的纯函数：阶段分组、耗时格式、模型名、隐藏判断、小图标。不碰 $（$ 不能跨 import 传）。
 
-import type { Prefs, SessionRow, Step, SubRow, Usage } from '../types'
+import type { Prefs, ScanLine, SessionRow, Step, SubRow, Usage } from '../types'
 
 export type Stage = { name: string; steps: Step[]; done: number; total: number; sec: number; state: 'done' | 'current' | 'todo' }
 
@@ -156,6 +156,28 @@ export function elapsed(s: SessionRow) {
   return p >= 0 ? p : t
 }
 
+/**
+ * 共用快照 → 现在的读数：快照是 `at` 那一刻的，所有“过了多少秒”都往后推 (now - at)，
+ * 缓存倒计时、用时、隐藏判断才对得上。太旧（超过 maxSec）或不是快照的返回 null。
+ */
+export function rebaseScan(got: unknown, now: number, maxSec: number): ScanLine | null {
+  const g = got as ScanLine | null
+  if (!g || typeof g.at !== 'number' || g.at <= 0 || !Array.isArray(g.sessions)) return null
+  const d = Math.max(0, Math.round((now - g.at) / 1000))
+  if (d > maxSec) return null
+  const later = (sec: number | undefined) => (typeof sec === 'number' && sec >= 0 ? sec + d : sec)
+  const sessions = g.sessions.map(s => ({
+    ...s,
+    ageSec: s.ageSec + d,
+    cacheAgeSec: later(s.cacheAgeSec) ?? -1,
+    turnSec: later(s.turnSec),
+    planSec: planOpen(s) ? later(s.planSec) : s.planSec,
+    steps: s.steps?.map(x => (x.s === 'in_progress' ? { ...x, sec: later(x.sec) ?? -1 } : x)),
+    subs: s.subs?.map(x => (x.active ? { ...x, sec: x.sec + d } : x)),
+  }))
+  return { ...g, at: g.at + d * 1000, sessions }
+}
+
 // ── 小图标（22×22，细线；颜色写死，因为 Svg 不跟随主题文字色）──────────────
 
 const MUTED = '#8a877f'
@@ -168,6 +190,18 @@ export function chevronSvg(open: boolean) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 22 22">${bg}` +
     `<path d="${path}" fill="none" stroke="${open ? BLUE : MUTED}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  )
+}
+
+/**
+ * 任务板收起 / 展开的小箭头：16px、灰色细线、不填底色（和 Running 卡片上的展开箭头同一画法）。
+ * 展开着 = 向下（点了收起）；收起着 = 向上（点了展开）。
+ */
+export function foldSvg(folded: boolean) {
+  const path = folded ? 'M7.5 12.75 11 9.25l3.5 3.5' : 'M7.5 9.25 11 12.75l3.5-3.5'
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 22 22">` +
+    `<path d="${path}" fill="none" stroke="${MUTED}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   )
 }
 

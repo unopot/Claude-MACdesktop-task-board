@@ -43,7 +43,11 @@ test('回答结束后 fork 出建议，点一下填进输入框', async ($, on) 
   })
   on('command.list', async () => ({ value: [] }))
   on('ui.log', async () => ({ value: undefined }))
-  on('prompt.suggest', async () => ({ isShown: true }))
+  let suggested = 0
+  on('prompt.suggest', async () => {
+    suggested++
+    return { isShown: true }
+  })
   on('prompt.fill', async (_$, e) => {
     filled.push(e.text)
     return { isFilled: true }
@@ -55,12 +59,16 @@ test('回答结束后 fork 出建议，点一下填进输入框', async ($, on) 
     expect(await ui.find({ key: 'next-0' })).toBeDefined()
     expect(await ui.find({ key: 'next-2' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: /this suggestion 1\.0k tok · cache read 226\.0k/ })).toBeDefined()
+    // 终端是按钮；桌面是点击层，按下（down）那一刻就填，不等松开
     if (surface === 'terminal') await ui.press({ key: 'next-0' })
-    else await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'hit-next-0' })
+    else await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'hit-next-0' })
     expect(filled.at(-1)).toBe('用 rvt-mcp 核对 L2 门编号')
     expect(await ui.find({ key: 'next-0' })).toBeUndefined()
     await ui.unmount()
   }
+
+  // 不再往输入框里放灰色预览（失焦时它消失，输入框变矮，上面这块跟着挪，点击会落空）
+  expect(suggested).toBe(0)
 
   // 子代理的轮次、太短的回答都不 fork
   const before = forks
@@ -115,4 +123,22 @@ test('原生风格任务板：每个会话一行带框，开关可见，过期�
     }
     await ui.unmount()
   }
+})
+
+test('桌面：建议还在 thinking… 时，点击层就先挂好（看不见），建议一出现就接得住', async ($, on) => {
+  on('state.get', async (_$, e, next) => {
+    if (e.plugin === 'task-board' && e.key === 'next') return { value: { value: { kind: 'loading', turnId: 't1' }, version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: { at: 0, tick: 0, sessions: [], prefs: { nextSteps: true } }, version: 1 } }
+    return next(e)
+  })
+  on('ui.render', async ($$, e) => {
+    const { Box } = $$.ui.resolve(e)
+    return <Box />
+  })
+  const ui = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
+  expect(await ui.find({ type: 'Text', text: /thinking/ })).toBeDefined()
+  expect(await ui.find({ key: 'hit-next-0' })).toBeDefined()
+  expect(await ui.find({ key: 'hit-next-2' })).toBeDefined()
+  expect(await ui.find({ key: 'hit-dismiss' })).toBeDefined()
+  await ui.unmount()
 })

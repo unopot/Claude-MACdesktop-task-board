@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Board, NextView, Prefs, SessionRow, SessionStatus, SubRow, Suggestion, Usage } from '../types'
+import type { Board, Fold, NextView, Prefs, ScanLine, SessionRow, SessionStatus, SubRow, Suggestion, Usage } from '../types'
 import { costOf, forkPrompt, nextOptions, parseSuggestions, skillList } from './next-steps'
-import { chevronSvg, clock, dur, elapsed, eyeOffSvg, freshest, isHidden, lastReqMs, limitNow, mainLine, modelName, moreSubs, percent, planOpen, pruneHidden, resetIn, ringHex, ringSvg, segSvg, stagesOf, stepLines, subsByStep } from './plan'
+import { chevronSvg, clock, dur, elapsed, eyeOffSvg, foldSvg, freshest, isHidden, lastReqMs, limitNow, mainLine, modelName, moreSubs, percent, planOpen, pruneHidden, rebaseScan, resetIn, ringHex, ringSvg, segSvg, stagesOf, stepLines, subsByStep } from './plan'
 
 const PANE = 'task-board'
 const TITLE = 'Sessions'
@@ -18,6 +18,8 @@ const HIDDEN: NextView = { kind: 'hidden' }
 const expanded = atom({ plugin: 'task-board', key: 'expanded' } as const, '')
 /** 本会话自己最近一次读到的账号用量（别的会话读到的经扫描进程转来，在 board.usage）。 */
 const usage = atom({ plugin: 'task-board', key: 'usage' } as const, { at: 0, limits: [] } as Usage)
+/** 任务板收起了没有（本会话）；没记过的读 $.store 里上次的选择，再没有就用默认。 */
+const fold = atom({ plugin: 'task-board', key: 'fold' } as const, {} as Fold)
 
 /** 多久没动静就从“活跃”里收起（运行中 / 待处理的会话始终显示）。 */
 const ACTIVE_SEC = 60 * 60
@@ -175,18 +177,8 @@ async function watch($: EngineInterface) {
       for (const line of lines) {
         if (!line.trim()) continue
         try {
-          const got = JSON.parse(line) as Pick<Board, 'at' | 'sessions' | 'prefs' | 'prefsPath' | 'usagePath' | 'inputDir'> & { usageText?: string }
-          await update($, board, b => ({
-            at: got.at,
-            tick: b.tick + 1,
-            sessions: got.sessions ?? [],
-            error: undefined,
-            prefs: got.prefs,
-            prefsPath: got.prefsPath,
-            usagePath: got.usagePath,
-            usage: parseUsage(got.usageText),
-            inputDir: got.inputDir,
-          }))
+          const got = JSON.parse(line) as ScanLine
+          await update($, board, b => boardFrom(got, b))
           await publishStatus($)
           await warnCache($, got.at, got.sessions ?? [])
           // 别的对话把建议关了：本会话正在显示的建议也收起
@@ -207,6 +199,45 @@ async function watch($: EngineInterface) {
   } finally {
     isWatching = false
   }
+}
+
+/** 扫描进程的一行（或共用快照）→ 任务板的数据。 */
+function boardFrom(got: ScanLine, b: Board): Board {
+  return {
+    at: got.at,
+    tick: b.tick + 1,
+    sessions: got.sessions ?? [],
+    error: undefined,
+    prefs: got.prefs,
+    prefsPath: got.prefsPath,
+    usagePath: got.usagePath,
+    usage: parseUsage(got.usageText),
+    inputDir: got.inputDir,
+  }
+}
+
+/** 快照最多用多旧的（秒）：更旧的状态多半已经变了，宁可等扫描进程的第一行。 */
+const SNAP_MAX_SEC = 10 * 60
+
+/**
+ * 新会话（或应用刚重启）还没扫描过：先拿别的会话的扫描进程最近写的共用快照顶上，任务板马上就有，
+ * 不用等自己的扫描进程读完所有 transcript；第一行扫描结果到了就换掉。热重载时 $.state 里本来就有，不读。
+ */
+async function seedFromSnapshot($: EngineInterface) {
+  if ((await read($, board)).at !== 0) return
+  const home = await $.env.get('USERPROFILE')
+  if (!home) return
+  let got: ScanLine | null
+  try {
+    got = rebaseScan(JSON.parse(await $.fs.read(`${home}\\.claude\\task-board-snapshot.json`)), await $.clock.now(), SNAP_MAX_SEC)
+  } catch {
+    return // 还没有快照，或正好在换文件
+  }
+  if (!got) return
+  const seed = got
+  // 扫描进程抢先出了结果就不覆盖
+  await update($, board, b => (b.at !== 0 ? b : boardFrom(seed, b)))
+  await publishStatus($)
 }
 
 /** 用量文件的内容 → 读数；空的、坏的都当没有。 */
@@ -264,6 +295,9 @@ const BLUE_LINE = 'rgba(59,130,246,0.55)'
 const BLUE_TINT = 'rgba(59,130,246,0.13)'
 /** 明细面板里子代理最多画几行，其余汇总成一行。 */
 const SUB_MAX = 3
+/** 手机窄屏：Done 栏最多几张卡片、明细里步骤表最多几行（超过就折叠做完的阶段）。 */
+const MOBILE_DONE_MAX = 3
+const MOBILE_STEP_MAX = 6
 
 /** 一条 3px 细进度线，宽度铺满所在的格子：中性灰轨道 + 按比例的实色填充，不做任何动画。 */
 function lineSvg(frac: number, color: string) {
@@ -418,9 +452,26 @@ async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[
   const { Box, Text, Button } = $.ui.resolve(e)
 
   if (v.kind === 'loading') {
+    // 桌面：趁“thinking…”的这几秒，把建议的点击层先挂上（0 大小、看不见）。点击层新建后要加载一下才接得住点击，
+    // 等建议出来再建，刚出现时点会没反应；同一个 key 一直在树里，引擎就沿用这个已加载好的实例
+    const warm =
+      e.surface === 'desktop'
+        ? (() => {
+            const { Client } = $.ui.resolve(e as Parameters<typeof $.ui.resolve>[0] & { surface: 'desktop' })
+            return (
+              <Box position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
+                {[0, 1, 2].map(i => (
+                  <Client key={`hit-next-${i}`} module="./hit.tsx" props={{ a: 'noop' }} width={1} height={1} />
+                ))}
+                <Client key="hit-dismiss" module="./hit.tsx" props={{ a: 'noop' }} width={1} height={1} />
+              </Box>
+            )
+          })()
+        : null
     return (
-      <Box marginTop={1}>
+      <Box position="relative" marginTop={1}>
         <Text dimColor>Suggest next step: thinking…</Text>
+        {warm}
       </Box>
     )
   }
@@ -443,11 +494,15 @@ async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[
     )
   }
 
-  // 桌面：扁平小卡片 + 透明点击层（Client），悬停只是边框加深、底色淡淡一层
+  // 桌面：扁平小卡片 + 透明点击层（Client），三处防“点了没反应”：
+  //   按下就触发（不等松开：点下去输入框失焦、这块挪了位置，松开时已不在原处）；
+  //   点击层在“thinking…”时就挂好了（见上面 warm），建议一出现就接得住；
+  //   点击层里直接带着建议全文（t），不用点了再按序号回头查。
+  // 不用原生按钮：桌面上原生按钮第一下常被拿去取得焦点，要点两次。
   const { Client } = $.ui.resolve(e as Parameters<typeof $.ui.resolve>[0] & { surface: 'desktop' })
-  const hit = (key: string, a: string) => (
+  const hit = (key: string, a: string, t?: string) => (
     <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-      <Client key={key} module="./hit.tsx" props={{ a }} width="100%" height="100%" />
+      <Client key={key} module="./hit.tsx" props={t === undefined ? { a, down: true } : { a, t, down: true }} width="100%" height="100%" />
     </Box>
   )
   return (
@@ -464,12 +519,54 @@ async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[
           <Box key={`next-${i}`} position="relative" flexDirection="row" gap={1} paddingX={1} borderStyle="round" borderDimColor hover={HOVER}>
             <Text dimColor>{i + 1}</Text>
             <Text>{item.label}</Text>
-            {hit(`hit-next-${i}`, `pick:${i}`)}
+            {hit(`hit-next-${i}`, 'pick-text', item.prompt)}
           </Box>
         ))}
       </Box>
     </Box>
   )
+}
+
+type FoldSurface = keyof Fold
+
+/** 这台设备上任务板是不是收起的：本会话点过的为准，否则用上次的选择（所有会话共用），默认手机收起、桌面展开。 */
+async function isFolded($: EngineInterface, surface: FoldSurface) {
+  const own = (await read($, fold))[surface]
+  if (own !== undefined) return own
+  const saved = (await $.store.get('fold').catch(() => undefined)) as Fold | undefined
+  return saved?.[surface] ?? surface === 'mobile'
+}
+
+/** 收起 / 展开：本会话马上生效，也记下来当以后新会话的默认。 */
+async function toggleFold($: EngineInterface, surface: FoldSurface) {
+  const next = !(await isFolded($, surface))
+  await update($, fold, f => ({ ...f, [surface]: next }))
+  const saved = ((await $.store.get('fold').catch(() => undefined)) ?? {}) as Fold
+  await $.store.set('fold', { ...saved, [surface]: next }).catch(() => undefined)
+}
+
+/**
+ * 任务板上的一个动作：桌面上来自透明点击层（hit.tsx）的消息，手机上来自 Button。
+ * toggle / details / dismiss / show-all / collapse / x:<id> / hide:<id> / unhide:<id> / pick:<n> / go:<id> / fold:desktop|mobile
+ */
+async function act($: EngineInterface, a: string) {
+  if (a === 'toggle') await toggleNext($)
+  else if (a === 'fold:desktop' || a === 'fold:mobile') await toggleFold($, a.slice(5) as FoldSurface)
+  else if (a === 'details') await $.ui.open({ id: PANE, title: TITLE })
+  else if (a === 'dismiss') await dismissNext($)
+  else if (a === 'show-all') await update($, showAll, x => !x)
+  else if (a === 'collapse') await update($, expanded, () => '')
+  else if (a.startsWith('x:')) await update($, expanded, x => (x === a.slice(2) ? '' : a.slice(2)))
+  else if (a.startsWith('hide:')) await setHidden($, a.slice(5), true)
+  else if (a.startsWith('unhide:')) await setHidden($, a.slice(7), false)
+  else if (a.startsWith('pick:')) {
+    const v = await read($, nextView)
+    const item = v.kind === 'offer' ? v.items[Number(a.slice(5))] : undefined
+    if (item) await pick($, item)
+  } else if (a.startsWith('go:')) {
+    const s = (await read($, board)).sessions.find(x => x.id === a.slice(3))
+    if (s) await jump($, s.link, s.title)
+  }
 }
 
 export const register: Register = (on, options) => {
@@ -512,8 +609,6 @@ export const register: Register = (on, options) => {
       // 等待期间开关被关了：这次已经花了，但不再显示
       if (!nextOn(await read($, board))) view = HIDDEN
       await update($, nextView, () => view)
-      const first = view.kind === 'offer' ? view.items[0] : undefined
-      if (first !== undefined) void $.prompt.suggest({ text: first.prompt }).catch(() => undefined)
     })()
     return result
   })
@@ -522,6 +617,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'task-board', description: 'Open the multi-session progress pane' })
     const id = await $.session.id()
     await update($, me, () => id)
+    void seedFromSnapshot($).catch(() => undefined)
     // 没有界面的会话（claude -p、SDK 后台任务）不起扫描进程；桌面界面往往晚于 session.start 才连上，
     // 所以连上时（session.attach）和第一次要画横条时还会再补启动
     if ((await $.session.surfaces()).length > 0) void watch($)
@@ -556,6 +652,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.attach', async ($, e, next) => {
+    void seedFromSnapshot($).catch(() => undefined)
     void watch($)
     // 续上的会话可能已经有用量读数了：先显示出来
     void $.session.usage().then(x => saveUsage($, x.rateLimits)).catch(() => undefined)
@@ -584,6 +681,247 @@ export const register: Register = (on, options) => {
       onPress: () => $.ui.open({ id: PANE, title: TITLE }).then(() => undefined),
     }
     const nextSwitch = { key: 'next-toggle', label: toggleLabel(b), onPress: () => toggleNext($) }
+    // 收起时只剩一行：各状态的数量（在等我的排最前、黄色），右端是展开按钮
+    const count = (f: (s: SessionRow) => boolean) => active.filter(f).length
+    const foldParts = [
+      { t: `● ${count(s => s.status === 'input')} needs input`, c: HEX.input, n: count(s => s.status === 'input') },
+      { t: `● ${count(s => s.status === 'running')} running`, c: HEX.running, n: count(s => s.status === 'running') },
+      { t: `● ${count(s => s.status === 'waiting')} waiting`, c: HEX.waiting, n: count(s => s.status === 'waiting') },
+      { t: `● ${count(s => s.status === 'done' || s.status === 'idle')} done`, c: HEX.done, n: 1 },
+    ].filter(x => x.n > 0)
+
+    // ── 手机（Claude 手机 App 用 Remote Control 遥控这台电脑上的对话时）：窄屏单栏 ──────────────
+    // 手机上没有 Client 点击层，可点的都是 Button；点卡片不跳转（跳转只会切换电脑上的桌面应用，对手机没用）。
+    // 从上到下：展开的明细 → Running 标题 + 用量圆环 → 在跑的卡片 → Done 标题 → 做完的卡片 → 开关和 Details。
+    if (e.surface === 'mobile') {
+      const { Box, Text, Button, Svg } = $.ui.resolve(e)
+      const live = active.filter(isLive).slice(0, BAND_MAX)
+      const finished = active.filter(s => s.status === 'done' || s.status === 'idle').slice(0, MOBILE_DONE_MAX)
+      const open = await read($, expanded)
+      const openRow = live.find(s => s.id === open)
+      const five = limitNow(freshest(await read($, usage), b.usage), 'five_hour', b.at)
+      const hiddenN = b.sessions.filter(s => isActive(s) && isHidden(b.prefs, b.at, s)).length
+      const isOn = nextOn(b)
+      const tone = (state: 'done' | 'current' | 'todo') => (state === 'done' ? HEX.done : state === 'current' ? HEX.running : undefined)
+      // 一次点按：在后台做，出错只记日志（不让一次失败的点按变成没人接的报错）
+      const tap = (a: string) => () => void act($, a).catch(err => $.ui.log(`task-board: ${a} failed: ${String(err)}`))
+      const pill = (key: string) => (
+        <Text key={key} bold color={ACCENT} backgroundColor={ACCENT_BG}> Current </Text>
+      )
+      // 用量圆环；收起时那一行太挤，只留百分比，不写多久重置
+      const usageMini = (withReset: boolean) =>
+        five && (
+          <Box key="m-usage" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+            <Svg source={ringSvg(five.pct)} alt={`Current session usage ${Math.round(five.pct)}%`} width={14} height={14} />
+            <Text>
+              <Text bold color={five.pct >= 80 ? ringHex(five.pct) : undefined}>{Math.round(five.pct)}%</Text>
+              {withReset && five.left > 0 && <Text dimColor> · {resetIn(five.left)}</Text>}
+            </Text>
+          </Box>
+        )
+
+      // 收起：一行摘要 + 用量 + 右端的展开按钮（手机默认收起，不挡聊天内容）
+      if (await isFolded($, 'mobile')) {
+        return (
+          <Box flexDirection="column">
+            <Box key="m-folded" flexDirection="row" alignItems="center" gap={1}>
+              <Box flexGrow={1} minWidth={0} overflow="hidden">
+                <Text wrap="truncate-end">
+                  {foldParts.map((x, i) => (
+                    <Text key={`m-fp-${i}`} color={x.c}>{i > 0 ? '  ' : ''}{x.t}</Text>
+                  ))}
+                </Text>
+              </Box>
+              {usageMini(false)}
+              <Box flexShrink={0}>
+                <Button key="m-fold" plain label="▴ Board" onPress={tap('fold:mobile')} />
+              </Box>
+            </Box>
+            {steps}
+          </Box>
+        )
+      }
+
+      // 卡片三行：● 标题 [Current] … 按钮 / 状态 · 用时 · 子代理 · token / 整宽进度线
+      const card = (s: SessionRow, kind: 'live' | 'done') => {
+        const st = rowState(s)
+        const isSelf = s.id === self
+        const isOpen = kind === 'live' && s.id === open
+        const t = elapsed(s)
+        const meta = [
+          kind === 'live' && t >= 0 ? `⏱ ${clock(t)}` : '',
+          kind === 'live' && s.subActive > 0 ? `${s.subActive} agent${s.subActive > 1 ? 's' : ''}` : '',
+          fmt(billed(s)),
+        ]
+          .filter(Boolean)
+          .join(' · ')
+        return (
+          <Box
+            key={`m-row-${s.id}`}
+            flexDirection="column"
+            paddingX={1}
+            marginTop={1}
+            borderStyle="round"
+            borderDimColor={!isSelf && !isOpen}
+            borderColor={isSelf ? ACCENT : isOpen ? BLUE_LINE : undefined}
+            backgroundColor={isSelf ? ACCENT_TINT : undefined}
+          >
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Text color={HEX[s.status]}>●</Text>
+              <Box flexGrow={1} minWidth={0} overflow="hidden">
+                <Text wrap="truncate-end">{s.title}</Text>
+              </Box>
+              {isSelf && <Box flexShrink={0}>{pill(`m-pill-${s.id}`)}</Box>}
+              <Box flexShrink={0}>
+                {kind === 'live' ? (
+                  <Button key={`m-x-${s.id}`} plain dimColor={!isOpen} label={isOpen ? '▴' : '▾'} onPress={tap(`x:${s.id}`)} />
+                ) : (
+                  <Button key={`m-h-${s.id}`} plain dimColor label="Hide" onPress={tap(`hide:${s.id}`)} />
+                )}
+              </Box>
+            </Box>
+            <Text wrap="truncate-end">
+              <Text bold color={st.color}>{st.text}</Text>
+              <Text dimColor> · {meta}</Text>
+            </Text>
+            <Box flexDirection="column">
+              <Svg source={lineSvg(st.frac, st.color)} alt={`${s.title}: ${st.text}`} height={6} />
+            </Box>
+          </Box>
+        )
+      }
+
+      // 子代理行：缩进，“└ ● 类型 · 模型 · 推理强度 · 工具 · 任务”，右边用时
+      const subRow = (x: SubRow, key: string) => (
+        <Box key={key} flexDirection="row" gap={1} paddingLeft={2}>
+          <Box flexGrow={1} minWidth={0} overflow="hidden">
+            <Text wrap="truncate-end">
+              <Text dimColor>└ </Text>
+              <Text color={x.active ? HEX.running : undefined} dimColor={!x.active}>{x.active ? '● ' : '✓ '}</Text>
+              <Text bold={x.active} dimColor={!x.active}>{x.name || 'agent'}</Text>
+              <Text dimColor>{` · ${[x.model ? modelName(x.model) : '', x.effort ?? '', x.active ? x.tool : '', x.desc].filter(Boolean).join(' · ')}`}</Text>
+            </Text>
+          </Box>
+          <Box flexShrink={0}>
+            <Text color={x.active ? HEX.running : undefined} dimColor={!x.active}>{x.active ? dur(x.sec) : `✓ ${dur(x.sec)}`}</Text>
+          </Box>
+        </Box>
+      )
+      const subRows = (list: SubRow[], key: string) => [
+        ...list.slice(0, SUB_MAX).map((x, i) => subRow(x, `${key}-sub-${i}`)),
+        ...(list.length > SUB_MAX
+          ? [
+              <Box key={`${key}-more`} paddingLeft={2}>
+                <Text dimColor>└ {moreSubs(list.slice(SUB_MAX))}</Text>
+              </Box>,
+            ]
+          : []),
+      ]
+
+      // 明细：窄屏放不下“阶段名”那一列，改成阶段名单独一行当小标题，步骤列在它下面
+      const panel = (s: SessionRow) => {
+        const steps = s.steps ?? []
+        const stages = stagesOf(steps)
+        const subs = s.subs ?? []
+        const named = stages.length > 1 || (stages[0]?.name ?? '') !== ''
+        const lines = stepLines(stages, MOBILE_STEP_MAX)
+        const { byStep, loose } = subsByStep(subs, steps.length)
+        const t = elapsed(s)
+        const summary = [steps.length > 0 ? `${s.done}/${s.total} steps · ${pct(s)}` : 'no task list', t >= 0 ? `⏱ ${clock(t)}` : '']
+          .filter(Boolean)
+          .join(' · ')
+        return (
+          <Box key="m-detail" flexDirection="column" paddingX={1} marginBottom={1} borderStyle="round" borderColor={BLUE_LINE}>
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Box flexGrow={1} minWidth={0} overflow="hidden">
+                <Text bold wrap="truncate-end">{s.title}</Text>
+              </Box>
+              {s.id === self && <Box flexShrink={0}>{pill('m-pill-detail')}</Box>}
+              <Box flexShrink={0}>
+                <Button key="m-collapse" plain dimColor label="Close" onPress={tap('collapse')} />
+              </Box>
+            </Box>
+            <Text dimColor wrap="truncate-end">{summary}</Text>
+            {lines.flatMap((ln, i) => {
+              const now = ln.step?.s === 'in_progress'
+              const ok = ln.step ? ln.step.s === 'completed' : ln.stage.state === 'done'
+              const g = ln.stage
+              const mine = (ln.step ? [ln.step] : g.steps).flatMap(x => byStep.get(x.i ?? -1) ?? [])
+              const head =
+                named && ln.first ? (
+                  <Box key={`m-stage-${i}`} marginTop={1}>
+                    <Text wrap="truncate-end">
+                      <Text bold={g.state !== 'todo'} color={tone(g.state)} dimColor={g.state === 'todo'}>{g.name || 'Steps'}</Text>
+                      {g.state !== 'todo' && (
+                        <Text color={tone(g.state)}>{g.state === 'done' ? ` ✓ ${dur(g.sec)}` : ` ${percent(g.done, g.total)} · ${dur(g.sec)}`}</Text>
+                      )}
+                      {!ln.step && <Text dimColor> · {g.total} steps</Text>}
+                    </Text>
+                  </Box>
+                ) : null
+              const row = ln.step ? (
+                <Box key={`m-step-${i}`} flexDirection="row" gap={1} paddingX={1} backgroundColor={now ? BLUE_TINT : undefined}>
+                  <Box width={2} flexShrink={0}>
+                    <Text color={ok ? HEX.done : now ? HEX.running : undefined} dimColor={!ok && !now}>{ok ? '✓' : now ? '●' : '○'}</Text>
+                  </Box>
+                  <Box flexGrow={1} minWidth={0} overflow="hidden">
+                    <Text bold={now} dimColor={!now} wrap="truncate-end">{ln.step.t}</Text>
+                  </Box>
+                  <Box flexShrink={0}>
+                    <Text color={now ? HEX.running : undefined} dimColor={!now}>
+                      {ln.step.sec < 0 ? '—' : now ? `running ${dur(ln.step.sec)}` : dur(ln.step.sec)}
+                    </Text>
+                  </Box>
+                </Box>
+              ) : null
+              return [head, row, ...subRows(mine, `m-step-${i}`)].filter(x => x !== null)
+            })}
+            <Box key="m-main" marginTop={1}>
+              <Text wrap="truncate-end">
+                <Text dimColor>◆ </Text>
+                <Text bold dimColor>Main</Text>
+                <Text dimColor> · {mainLine(s.model, s.effort, subs)}</Text>
+              </Text>
+            </Box>
+            {subRows(loose, 'm-loose')}
+          </Box>
+        )
+      }
+
+      return (
+        <Box flexDirection="column">
+          {openRow && panel(openRow)}
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+            <Box flexShrink={1} minWidth={0} overflow="hidden">
+              <Text wrap="truncate-end">
+                <Text bold>Running</Text>
+                <Text dimColor> {live.length} · {fmt(tokens)} tok</Text>
+              </Text>
+            </Box>
+            {usageMini(true)}
+          </Box>
+          {live.length === 0 ? <Text dimColor>No running sessions</Text> : live.map(s => card(s, 'live'))}
+          <Box marginTop={1}>
+            <Text>
+              <Text bold>Done</Text>
+              <Text dimColor> {finished.length} · cache left</Text>
+            </Text>
+          </Box>
+          {finished.length === 0 ? <Text dimColor>None</Text> : finished.map(s => card(s, 'done'))}
+          {/* 最后一行：左边开关和 Details，右下角是收起按钮 */}
+          <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={1} marginTop={1}>
+            <Box flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={1} minWidth={0}>
+              <Button key="m-next" plain dimColor={!isOn} label={`Suggest next step: ${isOn ? 'On' : 'Off'}`} onPress={tap('toggle')} />
+              <Button key="m-details" plain dimColor label={`Details${hiddenN > 0 ? ` · ${hiddenN} hidden` : ''}`} onPress={tap('details')} />
+            </Box>
+            <Box flexShrink={0}>
+              <Button key="m-fold" plain label="▾ Hide" onPress={tap('fold:mobile')} />
+            </Box>
+          </Box>
+          {steps}
+        </Box>
+      )
+    }
 
     if (e.surface !== 'desktop') {
       const { Box, Text, Button } = $.ui.resolve(e)
@@ -616,6 +954,38 @@ export const register: Register = (on, options) => {
         <Client key={key} module="./hit.tsx" props={{ a }} width="100%" height="100%" />
       </Box>
     )
+    // 收起：一行摘要 + 用量 + 右端的展开箭头；这一行放在最底下（下一步建议在它上面），箭头永远在最右下角
+    if (await isFolded($, 'desktop')) {
+      const five = limitNow(freshest(await read($, usage), b.usage), 'five_hour', b.at)
+      return (
+        <Box flexDirection="column">
+          {steps}
+          <Box key="folded" flexDirection="row" alignItems="center" gap={2} marginTop={steps ? 1 : 0}>
+            <Box flexGrow={1} minWidth={0} overflow="hidden">
+              <Text wrap="truncate-end">
+                <Text bold>Task board</Text>
+                {foldParts.map((x, i) => (
+                  <Text key={`fp-${i}`} color={x.c}>{'   '}{x.t}</Text>
+                ))}
+              </Text>
+            </Box>
+            {five && (
+              <Box key="folded-usage" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+                <Svg source={ringSvg(five.pct)} alt={`Current session usage ${Math.round(five.pct)}%`} width={16} height={16} />
+                <Text>
+                  <Text dimColor>Session </Text>
+                  <Text bold color={five.pct >= 80 ? ringHex(five.pct) : undefined}>{Math.round(five.pct)}%</Text>
+                </Text>
+              </Box>
+            )}
+            <Box key="fold-btn" position="relative" flexShrink={0} hover={HOVER_BG}>
+              <Svg source={foldSvg(true)} alt="Show the task board" width={16} height={16} />
+              {hit('hit-fold', 'fold:desktop')}
+            </Box>
+          </Box>
+        </Box>
+      )
+    }
     const live = active.filter(isLive).slice(0, BAND_MAX)
     const finished = active.filter(s => s.status === 'done' || s.status === 'idle').slice(0, BAND_MAX)
     const isOn = nextOn(b)
@@ -913,6 +1283,13 @@ export const register: Register = (on, options) => {
           </Box>
         </Box>
         {steps}
+        {/* 最右下角：收起箭头（在下一步建议下面，永远是整块的最后一行）；上面留半行，别贴着任务卡 */}
+        <Box flexDirection="row" justifyContent="flex-end" marginTop={0.5}>
+          <Box key="fold-btn" position="relative" hover={HOVER_BG}>
+            <Svg source={foldSvg(false)} alt="Collapse the task board" width={16} height={16} />
+            {hit('hit-fold', 'fold:desktop')}
+          </Box>
+        </Box>
       </Box>
     )
   })
@@ -920,24 +1297,10 @@ export const register: Register = (on, options) => {
   // 桌面上所有可点的东西都是透明点击层（hit.tsx）发来的消息
   on('ui.message', async ($, e, next) => {
     if (!e.module.endsWith('hit.tsx')) return next(e)
-    const a = (e.data as { a?: unknown } | null)?.a
-    if (typeof a !== 'string') return {}
-    if (a === 'toggle') await toggleNext($)
-    else if (a === 'details') await $.ui.open({ id: PANE, title: TITLE })
-    else if (a === 'dismiss') await dismissNext($)
-    else if (a === 'show-all') await update($, showAll, x => !x)
-    else if (a === 'collapse') await update($, expanded, () => '')
-    else if (a.startsWith('x:')) await update($, expanded, x => (x === a.slice(2) ? '' : a.slice(2)))
-    else if (a.startsWith('hide:')) await setHidden($, a.slice(5), true)
-    else if (a.startsWith('unhide:')) await setHidden($, a.slice(7), false)
-    else if (a.startsWith('pick:')) {
-      const v = await read($, nextView)
-      const item = v.kind === 'offer' ? v.items[Number(a.slice(5))] : undefined
-      if (item) await pick($, item)
-    } else if (a.startsWith('go:')) {
-      const s = (await read($, board)).sessions.find(x => x.id === a.slice(3))
-      if (s) await jump($, s.link, s.title)
-    }
+    const data = (e.data ?? {}) as { a?: unknown; t?: unknown }
+    const a = data.a
+    if (a === 'pick-text' && typeof data.t === 'string') await pick($, { label: '', prompt: data.t })
+    else if (typeof a === 'string' && a !== 'noop') await act($, a)
     return {}
   })
 

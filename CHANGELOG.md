@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.9.6
+- The collapse arrow at the bottom right sits half a row lower, clear of the session cards.
+
+## 1.9.5
+- Faster start: the scanner's first pass is about twice as fast (ordinal string search, inlined timestamp parsing).
+- New sessions show the board at once from a shared snapshot (`~/.claude/task-board-snapshot.json`, written at most every 10 s, used when under 10 minutes old, its timers moved forward to now) instead of waiting for their own first scan.
+
+## 1.9.0 – 1.9.4
+- Phone layout (Claude mobile app via Remote Control): one narrow column, buttons in place of click layers, folded by default.
+- A collapse / expand arrow at the bottom right of the board on desktop and phone; the choice is remembered for new sessions.
+- Next-step suggestions react to the first click: click layers are mounted while suggestions are still loading, and fire on pointer down.
+
 ## 1.8.4
 - Author and marketplace owner: unopot; marketplace name `unopot-mods`.
 

@@ -9,6 +9,9 @@ $usagePath = Join-Path $env:USERPROFILE '.claude\task-board-usage.json'
 # “在等我决定”的标记：每个会话一个文件（文件名 = 会话 id，内容 = 标记时间毫秒，空 = 没在等）
 $inputDir = Join-Path $env:USERPROFILE '.claude\task-board-input'
 New-Item -ItemType Directory -Force $inputDir | Out-Null
+# 最近一轮的输出（所有会话共用）：新开的会话先显示它，不用等自己的扫描进程读完所有 transcript
+$snapPath = Join-Path $env:USERPROFILE '.claude\task-board-snapshot.json'
+$lastSnap = [datetime]::MinValue
 $files = @{}   # path -> 增量状态
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $rxId = [regex]'"id":"(msg_[^"]+)"'
@@ -25,11 +28,6 @@ $rxTool = [regex]'"type":"tool_use","id":"[^"]*","name":"([^"]+)"'
 $rxEffort = [regex]'"effort":"([a-z]+)"'
 
 function Unesc([string]$s) { try { return [regex]::Unescape($s) } catch { return $s } }
-function Get-Ts($line) {
-  $m = $rxTs.Match($line)
-  if ($m.Success) { return ([datetime]::Parse($m.Groups[1].Value, $null, 'RoundtripKind')).ToUniversalTime() }
-  return $null
-}
 
 # 超过 MAX_PATH 的路径加 \\?\ 前缀（Windows PowerShell 5.1 / .NET Framework 默认不认长路径）
 function LongPath([string]$p) {
@@ -75,10 +73,13 @@ function Read-New($path, $st) {
 
   foreach ($line in $text.Split("`n")) {
     if ($line.Length -lt 2) { continue }
-    $lts = Get-Ts $line
+    # 时间戳就地解析（每行都要走一遍，PowerShell 调函数的开销比解析本身还大）
+    $lts = $null
+    $tm = $rxTs.Match($line)
+    if ($tm.Success) { $lts = ([datetime]::Parse($tm.Groups[1].Value, $null, 'RoundtripKind')).ToUniversalTime() }
     if ($lts) { if (-not $st.firstTs) { $st.firstTs = $lts }; $st.lastTs = $lts }
     # 用户亲手发的提问 = 新一轮开始（工具结果、系统附带的消息没有这个标记）
-    if ($lts -and $line.IndexOf('"origin":{"kind":"human"}') -ge 0) { $st.turnAt = $lts }
+    if ($lts -and $line.IndexOf('"origin":{"kind":"human"}', [StringComparison]::Ordinal) -ge 0) { $st.turnAt = $lts }
     $k = $rxKind.Match($line)
     if ($k.Success) {
       $st.kind = $k.Groups[1].Value
@@ -87,7 +88,7 @@ function Read-New($path, $st) {
         $tl = $rxTool.Matches($line); if ($tl.Count -gt 0) { $st.tool = $tl[$tl.Count - 1].Groups[1].Value; $st.calls += $tl.Count }
         $ef = $rxEffort.Match($line); if ($ef.Success) { $st.effort = $ef.Groups[1].Value }
         $s = $rxStop.Match($line); $st.stop = if ($s.Success) { $s.Groups[1].Value } else { '' }
-        if ($line.IndexOf('"usage"') -ge 0) {
+        if ($line.IndexOf('"usage"', [StringComparison]::Ordinal) -ge 0) {
           $u = $rxUsage.Match($line); $m = $rxId.Match($line)
           if ($u.Success -and $m.Success) {
             $v = @([long]$u.Groups[1].Value, [long]$u.Groups[2].Value, [long]$u.Groups[3].Value, [long]$u.Groups[4].Value)
@@ -95,11 +96,10 @@ function Read-New($path, $st) {
             if ($old) { $st.tin -= $old[0]; $st.tcw -= $old[1]; $st.tcr -= $old[2]; $st.tout -= $old[3] }
             $st.msgs[$m.Groups[1].Value] = $v
             $st.tin += $v[0]; $st.tcw += $v[1]; $st.tcr += $v[2]; $st.tout += $v[3]
-            $ts = $rxTs.Match($line)
-            if ($ts.Success) { $st.lastReq = ([datetime]::Parse($ts.Groups[1].Value, $null, 'RoundtripKind')).ToUniversalTime() }
+            if ($lts) { $st.lastReq = $lts }
           }
         }
-        if ($line.IndexOf('"name":"TodoWrite"') -ge 0) {
+        if ($line.IndexOf('"name":"TodoWrite"', [StringComparison]::Ordinal) -ge 0) {
           $o = $line | ConvertFrom-Json
           foreach ($c in $o.message.content) {
             if ($c.name -eq 'TodoWrite') {
@@ -112,7 +112,7 @@ function Read-New($path, $st) {
             }
           }
         }
-        if ($line.IndexOf('"name":"TaskCreate"') -ge 0) {
+        if ($line.IndexOf('"name":"TaskCreate"', [StringComparison]::Ordinal) -ge 0) {
           $o = $line | ConvertFrom-Json
           foreach ($c in $o.message.content) {
             if ($c.name -eq 'TaskCreate') {
@@ -133,8 +133,8 @@ function Read-New($path, $st) {
       if (-not $st.cwd) { $c2 = $rxCwd.Match($line); if ($c2.Success) { $st.cwd = Unesc $c2.Groups[1].Value } }
       continue
     }
-    if ($line.IndexOf('"custom-title"') -ge 0) { $t = $rxTitle.Match($line); if ($t.Success) { $st.title = Unesc $t.Groups[1].Value } }
-    elseif ($line.IndexOf('"last-prompt"') -ge 0) { $p = $rxPrompt.Match($line); if ($p.Success) { $st.prompt = Unesc $p.Groups[1].Value } }
+    if ($line.IndexOf('"custom-title"', [StringComparison]::Ordinal) -ge 0) { $t = $rxTitle.Match($line); if ($t.Success) { $st.title = Unesc $t.Groups[1].Value } }
+    elseif ($line.IndexOf('"last-prompt"', [StringComparison]::Ordinal) -ge 0) { $p = $rxPrompt.Match($line); if ($p.Success) { $st.prompt = Unesc $p.Groups[1].Value } }
   }
 }
 
@@ -334,5 +334,14 @@ do {
   $json = [regex]::Replace($json, '[^\x00-\x7F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
   [Console]::Out.WriteLine($json)
   [Console]::Out.Flush()
+  # 快照最多 10 秒写一次；先写临时文件再整个换上，读的一方不会读到半个文件（几个会话同时写，谁后换上算谁的）
+  if (($now - $lastSnap).TotalSeconds -ge 10) {
+    $lastSnap = $now
+    $tmp = "$snapPath.$PID.tmp"
+    try {
+      [System.IO.File]::WriteAllText($tmp, $json, $utf8)
+      if ([System.IO.File]::Exists($snapPath)) { [System.IO.File]::Replace($tmp, $snapPath, $null) } else { [System.IO.File]::Move($tmp, $snapPath) }
+    } catch { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+  }
   if (-not $Once) { Start-Sleep -Milliseconds $IntervalMs }
 } while (-not $Once)
