@@ -1,0 +1,39 @@
+{
+  "name": "task-board",
+  "version": "1.8.4",
+  "author": {
+    "name": "unopot"
+  },
+  "description": "Multi-session progress band: one bar per session with status, task progress, token use and a prompt-cache countdown; optional next-step suggestions above the prompt (one global on/off switch on the board).",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "cacheTtlMinutes": {
+      "type": "number",
+      "title": "Prompt cache lifetime (minutes)",
+      "description": "60 on a subscription; usually 5 on pay-as-you-go API. The countdown uses this.",
+      "required": false,
+      "default": 60
+    },
+    "cacheWarnMinutes": {
+      "type": "number",
+      "title": "Warn before cache expires (minutes)",
+      "description": "Show one toast when this session has this many minutes of cache left; 0 = never.",
+      "required": false,
+      "default": 5
+    },
+    "nextStepsMinChars": {
+      "type": "number",
+      "title": "Skip suggestions after short answers",
+      "description": "No suggestion (and no extra request) after answers shorter than this many characters.",
+      "required": false,
+      "default": 80
+    },
+    "nextStepsSkills": {
+      "type": "boolean",
+      "title": "Let suggestions use skills and slash commands",
+      "description": "Give the suggester this session's skills and slash commands so a suggestion can be /skill-name.",
+      "required": false,
+      "default": true
+    }
+  }
+}

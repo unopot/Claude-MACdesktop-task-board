@@ -1,0 +1,4 @@
+# 引擎为编辑器生成的类型文件（每台机器各自生成）
+task-board/.claude-plugin/types/
+node_modules/
+*.log
