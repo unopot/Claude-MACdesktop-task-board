@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.9.7
+- With next-step suggestions showing (or "thinking…"), the collapse arrow sits at the right end of the suggestion header instead of its own row, so a tall board no longer pushes it out of view.
+
 ## 1.9.6
 - The collapse arrow at the bottom right sits half a row lower, clear of the session cards.
 

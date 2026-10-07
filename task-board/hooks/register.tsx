@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Board, Fold, NextView, Prefs, ScanLine, SessionRow, SessionStatus, SubRow, Suggestion, Usage } from '../types'
 import { costOf, forkPrompt, nextOptions, parseSuggestions, skillList } from './next-steps'
@@ -446,7 +446,8 @@ async function setHidden($: EngineInterface, id: string, hide: boolean) {
 }
 
 /** 输入框正上方的“下一步”区块；没有可显示的内容时返回 null。 */
-async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[0] & { props: { isWorking: boolean } }) {
+/** trailing = 桌面上挂在这一块标题行最右边的东西（收起箭头），省掉单独一行，任务板不会因为太高把它挤出可见区。 */
+async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[0] & { props: { isWorking: boolean } }, trailing: RenderChildren = null) {
   const v = await read($, nextView)
   if (e.props.isWorking || v.kind === 'hidden' || !nextOn(await read($, board))) return null
   const { Box, Text, Button } = $.ui.resolve(e)
@@ -469,9 +470,10 @@ async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[
           })()
         : null
     return (
-      <Box position="relative" marginTop={1}>
+      <Box position="relative" marginTop={1} flexDirection="row" justifyContent="space-between" alignItems="center">
         <Text dimColor>Suggest next step: thinking…</Text>
         {warm}
+        {trailing}
       </Box>
     )
   }
@@ -509,9 +511,12 @@ async function nextBlock($: EngineInterface, e: Parameters<typeof $.ui.resolve>[
     <Box flexDirection="column" marginTop={1}>
       <Box flexDirection="row" justifyContent="space-between" alignItems="center">
         <Text dimColor>Suggest next step · fills the prompt box, nothing is sent · {cost}</Text>
-        <Box key="next-dismiss" position="relative" paddingX={1} hover={HOVER_BG}>
-          <Text dimColor>Dismiss</Text>
-          {hit('hit-dismiss', 'dismiss')}
+        <Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+          <Box key="next-dismiss" position="relative" paddingX={1} hover={HOVER_BG}>
+            <Text dimColor>Dismiss</Text>
+            {hit('hit-dismiss', 'dismiss')}
+          </Box>
+          {trailing}
         </Box>
       </Box>
       <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -1248,6 +1253,14 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
+    const foldBtn = (
+      <Box key="fold-btn" position="relative" flexShrink={0} hover={HOVER_BG}>
+        <Svg source={foldSvg(false)} alt="Collapse the task board" width={16} height={16} />
+        {hit('hit-fold', 'fold:desktop')}
+      </Box>
+    )
+    const tail = await nextBlock($, e, foldBtn)
+
     return (
       <Box flexDirection="column">
         {openRow && panel(openRow)}
@@ -1282,14 +1295,13 @@ export const register: Register = (on, options) => {
             {finished.length === 0 ? <Text dimColor>None</Text> : finished.map(s => row(s, 'done'))}
           </Box>
         </Box>
-        {steps}
-        {/* 最右下角：收起箭头（在下一步建议下面，永远是整块的最后一行）；上面留半行，别贴着任务卡 */}
-        <Box flexDirection="row" justifyContent="flex-end" marginTop={0.5}>
-          <Box key="fold-btn" position="relative" hover={HOVER_BG}>
-            <Svg source={foldSvg(false)} alt="Collapse the task board" width={16} height={16} />
-            {hit('hit-fold', 'fold:desktop')}
+        {/* 收起箭头：有下一步建议时挂在建议标题行最右边（不多占一行，免得任务板太高把它挤出可见区）；
+            没有建议时单独一行在最右下角，上面留半行，别贴着任务卡 */}
+        {tail ?? (
+          <Box flexDirection="row" justifyContent="flex-end" marginTop={0.5}>
+            {foldBtn}
           </Box>
-        </Box>
+        )}
       </Box>
     )
   })

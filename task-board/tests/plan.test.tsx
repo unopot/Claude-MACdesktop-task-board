@@ -376,6 +376,32 @@ test('桌面：默认展开，最右下角的小箭头收起成一行，再点�
   await ui.unmount()
 })
 
+test('桌面：下一步建议出来时，收起箭头挂在建议标题行最右边，不另占一行', async ($, on) => {
+  const at = Date.now()
+  const board = { at, tick: 1, prefs: { nextSteps: true }, prefsPath: 'C:/x/prefs.json', sessions: [row('a', '在跑的会话', 'running', 5)] }
+  let next: { kind: string } = { kind: 'hidden' }
+  on('state.get', async (_$, e, n) => {
+    if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'a', version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'next') return { value: { value: next, version: 1 } }
+    return n(e)
+  })
+  on('ui.log', async () => ({ value: undefined }))
+  for (const view of [
+    { kind: 'offer', items: [{ label: '核对', prompt: '核对一下' }], billed: 100, cacheRead: 0 },
+    { kind: 'loading', turnId: 't1' },
+  ]) {
+    next = view
+    const ui = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: next.kind === 'offer' ? /Suggest next step ·/ : /thinking/ })).toBeDefined()
+    expect(await ui.find({ key: 'fold-btn' })).toBeDefined()
+    await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'hit-fold' })
+    expect(await ui.find({ key: 'folded' })).toBeDefined()
+    await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'hit-fold' })
+    await ui.unmount()
+  }
+})
+
 test('手机：Details 窗也能画（没有 Client，用普通按钮）', async ($, on) => {
   const at = Date.now()
   const board = { at, tick: 1, prefs: { nextSteps: false }, prefsPath: 'C:/x/prefs.json', sessions: [row('b', '本会话', 'running', 5), row('c', '做完的会话', 'done', 600)] }
