@@ -45,7 +45,7 @@
 ## 安装
 
 ```bash
-claude plugin marketplace add unopot/task-board
+claude plugin marketplace add unopot/Claude-WINdesktop-task-board
 ```
 
 ```bash
