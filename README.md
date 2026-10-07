@@ -2,8 +2,6 @@
 
 A board above the prompt in the Claude desktop app's **Code** tab that shows every Claude Code session you have going, side by side: what is running, what is waiting for you, what has finished, and how much prompt cache each finished session has left.
 
-[中文说明](README.zh-CN.md)
-
 ![The board: running sessions on the left, finished sessions on the right](docs/board.png)
 
 Expand a running card to see its task list by stage, how long each step took, which model the session runs on, and which subagents each step sent out:
