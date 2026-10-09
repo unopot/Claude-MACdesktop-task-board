@@ -1,6 +1,6 @@
 {
-  "name": "unopot-mods",
-  "description": "A board above the Claude Code prompt showing every session: progress, needs-input, cache countdown, usage.",
+  "name": "unopot-mac-mods",
+  "description": "A board above the Claude Code prompt showing every session: progress, needs-input, cache countdown, usage (macOS).",
   "owner": {
     "name": "unopot"
   },
@@ -8,7 +8,7 @@
     {
       "name": "task-board",
       "source": "./task-board",
-      "description": "Multi-session progress band with prompt-cache countdown and optional next-step suggestions"
+      "description": "Multi-session progress band with prompt-cache countdown and optional next-step suggestions (macOS)"
     }
   ]
 }

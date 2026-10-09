@@ -52,7 +52,7 @@ const BAND = {
 test('任务板：本会话有 Current 标记，展开明细，隐藏已完成会话', async ($, on) => {
   const at = Date.now()
   const board = {
-    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: 'C:/x/prefs.json',
+    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: '/Users/u/.claude/task-board-prefs.json',
     usage: { at: at - 5000, limits: [{ kind: 'five_hour', percentUsed: 23.5, resetsAt: new Date(at + 7_980_000).toISOString() }] },
     sessions: [
       row('a', 'Revit 门编号核对', 'running', 5, {
@@ -153,7 +153,7 @@ test('任务板：本会话有 Current 标记，展开明细，隐藏已完成�
 test('Details 窗：三行布局，Current / Hidden 标签，点 Unhide 写回开关文件', async ($, on) => {
   const at = Date.now()
   const board = {
-    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: 'C:/x/prefs.json',
+    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: '/Users/u/.claude/task-board-prefs.json',
     sessions: [row('b', '本会话', 'running', 5), row('e', '已隐藏的会话', 'done', 600)],
   }
   on('state.get', async (_$, e, next) => {
@@ -208,7 +208,7 @@ test('用量圆环：取新的读数，过了重置时间按 0% 算，颜色随�
 })
 
 test('needs input 标记：弹授权框时写本会话的标记文件，答完清空', async ($, on) => {
-  const board = { at: Date.now(), tick: 1, sessions: [], inputDir: 'C:/x/in' }
+  const board = { at: Date.now(), tick: 1, sessions: [], inputDir: '/Users/u/.claude/task-board-input' }
   on('state.get', async (_$, e, next) => {
     if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
     if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'b', version: 1 } }
@@ -224,7 +224,7 @@ test('needs input 标记：弹授权框时写本会话的标记文件，答完�
   on('classic.ElicitationResult', async () => ({}))
   await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } })
   expect(writes.length).toBe(1)
-  expect(writes[0]?.path.replace(/\\/g, '/')).toBe('C:/x/in/b')
+  expect(writes[0]?.path).toBe('/Users/u/.claude/task-board-input/b')
   expect(writes[0]?.text).toBe('1791000000000')
   await $.classic.ElicitationResult({ mcp_server_name: 'x', action: 'accept' })
   expect(writes.length).toBe(2)
@@ -274,7 +274,7 @@ test('子代理按派它的那一步分组；Main 行写出主会话的模型，
 test('手机：窄屏单栏，按钮代替点击层；展开明细、收起、隐藏、开关都能点', async ($, on) => {
   const at = Date.now()
   const board = {
-    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: 'C:/x/prefs.json',
+    at, tick: 1, prefs: { nextSteps: false, hidden: { e: at - 600_000 } }, prefsPath: '/Users/u/.claude/task-board-prefs.json',
     usage: { at: at - 5000, limits: [{ kind: 'five_hour', percentUsed: 23.5, resetsAt: new Date(at + 7_980_000).toISOString() }] },
     sessions: [
       row('a', 'Refactor auth module', 'running', 5, {
@@ -352,7 +352,7 @@ test('手机：窄屏单栏，按钮代替点击层；展开明细、收起、�
 test('桌面：默认展开，最右下角的小箭头收起成一行，再点箭头展开', async ($, on) => {
   const at = Date.now()
   const board = {
-    at, tick: 1, prefs: { nextSteps: false }, prefsPath: 'C:/x/prefs.json',
+    at, tick: 1, prefs: { nextSteps: false }, prefsPath: '/Users/u/.claude/task-board-prefs.json',
     sessions: [row('a', '在跑的会话', 'running', 5), row('q', '等我授权的会话', 'input', 5), row('c', '做完的会话', 'done', 600)],
   }
   on('state.get', async (_$, e, next) => {
@@ -378,7 +378,7 @@ test('桌面：默认展开，最右下角的小箭头收起成一行，再点�
 
 test('桌面：下一步建议出来时，收起箭头挂在建议标题行最右边，不另占一行', async ($, on) => {
   const at = Date.now()
-  const board = { at, tick: 1, prefs: { nextSteps: true }, prefsPath: 'C:/x/prefs.json', sessions: [row('a', '在跑的会话', 'running', 5)] }
+  const board = { at, tick: 1, prefs: { nextSteps: true }, prefsPath: '/Users/u/.claude/task-board-prefs.json', sessions: [row('a', '在跑的会话', 'running', 5)] }
   let next: { kind: string } = { kind: 'hidden' }
   on('state.get', async (_$, e, n) => {
     if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
@@ -404,7 +404,7 @@ test('桌面：下一步建议出来时，收起箭头挂在建议标题行最�
 
 test('手机：Details 窗也能画（没有 Client，用普通按钮）', async ($, on) => {
   const at = Date.now()
-  const board = { at, tick: 1, prefs: { nextSteps: false }, prefsPath: 'C:/x/prefs.json', sessions: [row('b', '本会话', 'running', 5), row('c', '做完的会话', 'done', 600)] }
+  const board = { at, tick: 1, prefs: { nextSteps: false }, prefsPath: '/Users/u/.claude/task-board-prefs.json', sessions: [row('b', '本会话', 'running', 5), row('c', '做完的会话', 'done', 600)] }
   on('state.get', async (_$, e, next) => {
     if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
     if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'b', version: 1 } }
@@ -423,7 +423,7 @@ test('共用快照：所有“过了多少秒”往后推到现在，太旧的�
   const at = 1_791_000_000_000
   const snap = {
     at,
-    prefsPath: 'C:/p.json',
+    prefsPath: '/Users/u/p.json',
     sessions: [
       row('a', '在跑', 'running', 30, {
         total: 3, done: 1, planSec: 100, turnSec: 50,
@@ -435,7 +435,7 @@ test('共用快照：所有“过了多少秒”往后推到现在，太旧的�
   }
   const got = rebaseScan(snap, at + 8_400, 600)
   expect(got?.at).toBe(at + 8_000)
-  expect(got?.prefsPath).toBe('C:/p.json')
+  expect(got?.prefsPath).toBe('/Users/u/p.json')
   const [a, b] = got?.sessions ?? []
   expect([a?.ageSec, a?.cacheAgeSec, a?.turnSec, a?.planSec]).toEqual([18, 38, 58, 108])
   expect(a?.steps?.map(x => x.sec)).toEqual([20, 48, -1])
@@ -453,10 +453,10 @@ test('共用快照：所有“过了多少秒”往后推到现在，太旧的�
 test('新会话：一启动就用共用快照填上任务板，不等扫描进程', async ($, on) => {
   const at = 1_791_000_000_000
   const reads: string[] = []
-  mock.env(on, { USERPROFILE: 'C:\\Users\\u' })
+  mock.env(on, { HOME: '/Users/u' })
   on('fs.read', async (_$, e) => {
     reads.push(e.path)
-    return { value: JSON.stringify({ at, sessions: [row('a', '别的会话', 'done', 30)], prefsPath: 'C:/p.json' }) }
+    return { value: JSON.stringify({ at, sessions: [row('a', '别的会话', 'done', 30)], prefsPath: '/Users/u/.claude/task-board-prefs.json' }) }
   })
   const clock = mock.clock(on, { now: at + 5_000 })
   on('session.surfaces', async () => ({ value: [] }))
@@ -468,10 +468,10 @@ test('新会话：一启动就用共用快照填上任务板，不等扫描进�
     if (e.plugin === 'task-board' && e.key === 'board') boards.push(e.value as (typeof boards)[number])
     return next(e)
   })
-  await $.session.start({ cwd: 'C:\\w', surface: null, isInteractive: false })
+  await $.session.start({ cwd: '/Users/u/w', surface: null, isInteractive: false })
   // 读快照是放到后台做的（不拖住会话启动），等它落地
   await clock.settle()
-  expect(reads.map(p => p.replace(/\\/g, '/'))).toContain('C:/Users/u/.claude/task-board-snapshot.json')
+  expect(reads).toContain('/Users/u/.claude/task-board-snapshot.json')
   const b = boards.at(-1)
   expect(b?.at).toBe(at + 5_000)
   expect(b?.sessions.map(s => [s.title, s.cacheAgeSec])).toEqual([['别的会话', 35]])

@@ -2,3 +2,4 @@
 task-board/.claude-plugin/types/
 node_modules/
 *.log
+.DS_Store

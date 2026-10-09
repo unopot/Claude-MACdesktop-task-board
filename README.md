@@ -1,6 +1,8 @@
 # task-board
 
-A board above the prompt in the Claude desktop app's **Code** tab that shows every Claude Code session you have going, side by side: what is running, what is waiting for you, what has finished, and how much prompt cache each finished session has left.
+A board above the prompt in the Claude desktop app's **Code** tab (macOS) that shows every Claude Code session you have going, side by side: what is running, what is waiting for you, what has finished, and how much prompt cache each finished session has left.
+
+This is the macOS port of [Claude-WINdesktop-task-board](https://github.com/unopot/Claude-WINdesktop-task-board): same board, same details panel, same settings; only the background scanner and the file paths changed.
 
 ![The board: running sessions on the left, finished sessions on the right](docs/board.png)
 
@@ -31,7 +33,7 @@ Interactions:
 
 ## Requirements
 
-- **Windows 10 or 11.** The background scanner is a Windows PowerShell 5.1 script, which every Windows install has.
+- **macOS.** The background scanner is a Perl script run by `/usr/bin/perl` (5.34 with `JSON::PP`), which every Mac ships with. Nothing to install.
 - **The Claude desktop app, Code tab.** The board is drawn for the desktop. In a terminal session it shows a compact one-line summary instead.
 - A Claude Code build that loads hooks-module plugins ("mods"). Developed and tested on Claude Code 2.1.289.
 - The usage ring needs a Claude subscription; without one it stays hidden.
@@ -39,23 +41,23 @@ Interactions:
 ## Install
 
 ```bash
-claude plugin marketplace add unopot/Claude-WINdesktop-task-board
+claude plugin marketplace add unopot/Claude-MACdesktop-task-board
 ```
 
 ```bash
-claude plugin install task-board@unopot-mods
+claude plugin install task-board@unopot-mac-mods
 ```
 
-Then quit the Claude desktop app completely (including the tray icon) and open it again. The board appears above the prompt a few seconds after your first message.
+Then quit the Claude desktop app completely (⌘Q, including the menu bar icon) and open it again. The board appears above the prompt a few seconds after your first message.
 
 Update later with:
 
 ```bash
-claude plugin marketplace update unopot-mods
+claude plugin marketplace update unopot-mac-mods
 ```
 
 ```bash
-claude plugin update task-board@unopot-mods
+claude plugin update task-board@unopot-mac-mods
 ```
 
 ## Optional: group steps into stages
@@ -80,7 +82,7 @@ Without these the board still works; the details simply list the steps without s
 
 ## Settings
 
-Run `/plugin configure task-board@unopot-mods` in Claude Code:
+Run `/plugin configure task-board@unopot-mac-mods` in Claude Code:
 
 | Setting | Default | |
 | --- | --- | --- |
@@ -91,24 +93,25 @@ Run `/plugin configure task-board@unopot-mods` in Claude Code:
 
 ## How it works and what it touches
 
-- Each session starts one small PowerShell process that reads the transcripts under `~/.claude/projects` incrementally every 3 seconds, plus the desktop app's session list for titles and links. Nothing leaves your machine; the plugin makes no network requests of its own.
+- Each session starts one small Perl process (`scan.pl`) that reads the transcripts under `~/.claude/projects` incrementally every 3 seconds, plus the desktop app's session list under `~/Library/Application Support/Claude/claude-code-sessions` for titles and links. Nothing leaves your machine; the plugin makes no network requests of its own.
 - A session marks itself as *needs input* when it raises a permission dialog, `AskUserQuestion` or an MCP form, and clears the mark when the call finishes or the turn ends.
-- It writes three small things under `~/.claude`: `task-board-prefs.json` (switch and hidden sessions), `task-board-usage.json` (latest usage reading, shared between sessions) and the folder `task-board-input/` (the needs-input marks). Delete them after uninstalling if you like.
+- It writes four small things under `~/.claude`: `task-board-prefs.json` (switch and hidden sessions), `task-board-usage.json` (latest usage reading, shared between sessions), `task-board-snapshot.json` (the latest scan, so a new session shows the board at once) and the folder `task-board-input/` (the needs-input marks). Delete them after uninstalling if you like.
+- Clicking a card runs `open claude://…`, which brings the desktop app to that session.
 
 ## Known limitations
 
-- Windows only for now.
+- macOS only. For Windows use [Claude-WINdesktop-task-board](https://github.com/unopot/Claude-WINdesktop-task-board).
 - The plugin cannot see the moment you approve a permission dialog, so after you approve a long command the card stays yellow until that command finishes.
 - A subagent is attached to the step that was in progress when it started; subagents started between steps are listed under **Main**.
 
 ## Uninstall
 
 ```bash
-claude plugin uninstall task-board@unopot-mods
+claude plugin uninstall task-board@unopot-mac-mods
 ```
 
 ```bash
-claude plugin marketplace remove unopot-mods
+claude plugin marketplace remove unopot-mac-mods
 ```
 
 ## Development
@@ -121,6 +124,18 @@ claude plugin validate task-board
 
 ```bash
 claude plugin test task-board
+```
+
+The scanner has its own tests against synthetic transcripts:
+
+```bash
+perl task-board/tests/scan.t
+```
+
+To watch what the scanner reports for your real sessions:
+
+```bash
+perl task-board/scan.pl --once
 ```
 
 ## License

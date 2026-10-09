@@ -84,7 +84,7 @@ const row = (id: string, title: string, status: 'running' | 'done', cacheAgeSec:
 
 test('原生风格任务板：每个会话一行带框，开关可见，过期会话收起', async ($, on) => {
   const board = {
-    at: Date.now(), tick: 1, prefs: { nextSteps: true }, prefsPath: 'C:/x/prefs.json',
+    at: Date.now(), tick: 1, prefs: { nextSteps: true }, prefsPath: '/Users/u/.claude/task-board-prefs.json',
     sessions: [
       row('a', 'Revit 门编号核对', 'running', 5),
       row('b', '拆分明细表到各地块', 'running', 5, 3, 5),

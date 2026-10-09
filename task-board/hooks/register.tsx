@@ -135,10 +135,13 @@ async function publishStatus($: EngineInterface) {
 
 async function scriptPath($: EngineInterface) {
   const root = $.plugin.root.replace(/[\\/]+$/, '')
-  const here = `${root}/scan.ps1`
+  const here = `${root}/scan.pl`
   if (await $.fs.exists(here)) return here
-  return `${root.replace(/[\\/]\.claude-plugin$/, '')}/scan.ps1`
+  return `${root.replace(/[\\/]\.claude-plugin$/, '')}/scan.pl`
 }
+
+/** macOS 自带的 Perl（5.34，含 JSON::PP）：每台 Mac 都有，不用另装任何东西。 */
+const PERL = '/usr/bin/perl'
 
 /** 已经为哪一次请求提醒过（最后请求时间，10 秒取整），同一次请求只提醒一回。 */
 let warnedReq = -1
@@ -166,7 +169,7 @@ async function watch($: EngineInterface) {
   try {
     const script = await scriptPath($)
     const child = $.process.spawn({
-      argv: ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Hours', '24', '-Max', '12'],
+      argv: [PERL, script, '--hours', '24', '--max', '12'],
     })
     let pending = ''
     for await (const { stream, text } of child) {
@@ -225,11 +228,11 @@ const SNAP_MAX_SEC = 10 * 60
  */
 async function seedFromSnapshot($: EngineInterface) {
   if ((await read($, board)).at !== 0) return
-  const home = await $.env.get('USERPROFILE')
+  const home = await $.env.get('HOME')
   if (!home) return
   let got: ScanLine | null
   try {
-    got = rebaseScan(JSON.parse(await $.fs.read(`${home}\\.claude\\task-board-snapshot.json`)), await $.clock.now(), SNAP_MAX_SEC)
+    got = rebaseScan(JSON.parse(await $.fs.read(`${home}/.claude/task-board-snapshot.json`)), await $.clock.now(), SNAP_MAX_SEC)
   } catch {
     return // 还没有快照，或正好在换文件
   }
@@ -335,7 +338,7 @@ function rowState(s: SessionRow) {
 }
 
 
-/** 交给 Windows 打开 claude:// 链接，Claude 应用会切到对应会话。 */
+/** 交给 macOS 的 open 打开 claude:// 链接，Claude 应用会切到对应会话。 */
 async function jump($: EngineInterface, link: string, title: string) {
   if (!/^claude:\/\/claude\.ai\/epitaxy\/local_[0-9a-f-]+$/.test(link)) {
     await $.ui.toast(`"${title}" has no link to switch to`)
@@ -343,7 +346,7 @@ async function jump($: EngineInterface, link: string, title: string) {
   }
   await $.ui.toast(`Switching to "${title}"…`)
   try {
-    const r = await $.process.run(['rundll32.exe', 'url.dll,FileProtocolHandler', link])
+    const r = await $.process.run(['/usr/bin/open', link])
     if (r.exitCode !== 0) await $.ui.toast(`Switch failed (exit code ${r.exitCode})`)
   } catch (err) {
     await $.ui.toast(`Switch failed: ${String(err)}`)
@@ -916,7 +919,7 @@ export const register: Register = (on, options) => {
           {/* 最后一行：左边开关和 Details，右下角是收起按钮 */}
           <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={1} marginTop={1}>
             <Box flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={1} minWidth={0}>
-              <Button key="m-next" plain dimColor={!isOn} label={`Suggest next step: ${isOn ? 'On' : 'Off'}`} onPress={tap('toggle')} />
+              <Button key="m-next" plain dimColor={!isOn} label={`Next step: ${isOn ? 'On' : 'Off'}`} onPress={tap('toggle')} />
               <Button key="m-details" plain dimColor label={`Details${hiddenN > 0 ? ` · ${hiddenN} hidden` : ''}`} onPress={tap('details')} />
             </Box>
             <Box flexShrink={0}>
@@ -1223,8 +1226,8 @@ export const register: Register = (on, options) => {
 
     // 扁平胶囊开关：文字 + On/Off + 小滑块，整块可点（透明点击层盖在上面）
     const toggle = (
-      <Box key="next-switch" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1} paddingY={0.5} borderStyle="round" borderDimColor>
-        <Text bold>Suggest next step</Text>
+      <Box key="next-switch" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1} paddingY={0.5} borderStyle="round" borderDimColor flexShrink={0}>
+        <Text bold wrap="truncate-end">Next step</Text>
         <Text color={isOn ? ACCENT : undefined} dimColor={!isOn}>{isOn ? "On" : "Off"}</Text>
         <Svg source={switchSvg(isOn)} alt={isOn ? 'Suggest next step is on' : 'Suggest next step is off'} width={30} height={18} />
         {hit('next-toggle', 'toggle')}
@@ -1264,24 +1267,31 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {openRow && panel(openRow)}
-        {/* 两栏的标题放同一行（右边有开关、更高，左边跟着撑到一样高、文字居中），卡片另起一行，左右第一张卡顶部对齐 */}
+        {/* 两栏的标题放同一行（右边有开关、更高，左边跟着撑到一样高、文字居中），卡片另起一行，左右第一张卡顶部对齐。
+            窗口窄时（Mac 的输入框比 Windows 窄一些）开关、Details、用量圆环不压缩、不换行，标题文字被挤时截断 */}
         <Box flexDirection="row" gap={3}>
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} width="50%">
-            <Text wrap="truncate-end">
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} width="50%" minWidth={0}>
+            {/* 标题和后面的说明是两个同级 Text（嵌在一个 Text 里时内层照样换行）：说明那段单独放在可截断的盒子里 */}
+            <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
               <Text bold>Running</Text>
-              <Text dimColor> {live.length} · {fmt(tokens)} tok</Text>
-            </Text>
+              <Box flexShrink={1} minWidth={0} overflow="hidden">
+                <Text dimColor wrap="truncate-end">{live.length} · {fmt(tokens)} tok</Text>
+              </Box>
+            </Box>
             {ring}
           </Box>
-          <Box flexDirection="row" justifyContent="space-between" alignItems="center" width="50%">
-            <Text>
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} width="50%" minWidth={0}>
+            <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
               <Text bold>Done</Text>
-              <Text dimColor> {finished.length} · cache left</Text>
-            </Text>
-            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Box flexShrink={1} minWidth={0} overflow="hidden">
+                <Text dimColor wrap="truncate-end">{finished.length} · cache left</Text>
+              </Box>
+            </Box>
+            {/* 开关不压缩；Details 可以让位（被挤时截断），把宽度留给 cache left */}
+            <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0}>
               {toggle}
-              <Box key="details-link" position="relative" paddingX={1} hover={HOVER_BG}>
-                <Text dimColor>{details.label}{hiddenN > 0 ? ` · ${hiddenN} hidden` : ''}</Text>
+              <Box key="details-link" position="relative" paddingX={1} hover={HOVER_BG} flexShrink={1} minWidth={0} overflow="hidden">
+                <Text dimColor wrap="truncate-end">{details.label}{hiddenN > 0 ? ` · ${hiddenN} hidden` : ''}</Text>
                 {hit('hit-details', 'details')}
               </Box>
             </Box>
@@ -1374,7 +1384,7 @@ export const register: Register = (on, options) => {
             <Text bold>{summary}</Text>
             <Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
               <Box key="pane-switch" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1} borderStyle="round" borderDimColor>
-                <Text bold>Suggest next step</Text>
+                <Text bold>Next step</Text>
                 <Text color={isOn ? ACCENT : undefined} dimColor={!isOn}>{isOn ? 'On' : 'Off'}</Text>
                 <Svg source={switchSvg(isOn)} alt={isOn ? 'Suggest next step is on' : 'Suggest next step is off'} width={30} height={18} />
                 {hit('pane-next-toggle', 'toggle')}
