@@ -31,21 +31,21 @@ sub assistant {
     message => obj(model => $o{model} // 'claude-opus-5-5', id => "msg_demo_$n", type => 'message', role => 'assistant', content => $o{content},
       stop_reason => $o{stop} // 'tool_use',
       usage => obj(input_tokens => 20, cache_creation_input_tokens => 1500, cache_read_input_tokens => 42000, output_tokens => 300)),
-    effort => 'high', type => 'assistant', uuid => "u$n", timestamp => iso(), cwd => '/Users/demo/revit-doors');
+    effort => 'high', type => 'assistant', uuid => "u$n", timestamp => iso(), cwd => '/Users/demo/demo-project');
 }
 sub tool { my ($name, $input) = @_; obj(type => 'tool_use', id => 'tu' . (++$n), name => $name, input => $input) }
 
 # 清单：三个阶段
-my @tasks = ('Survey: Read door schedule', 'Survey: Probe Revit schema', 'Renumber: Set level prefix', 'Renumber: Renumber 14 doors', 'Export: Write A-201 sheet', 'Export: Verify PDF');
+my @tasks = ('Survey: Read release notes', 'Survey: Probe the schema', 'Renumber: Set level prefix', 'Renumber: Renumber 14 files', 'Export: Write the PDF', 'Export: Verify PDF');
 
 open(my $fh, '>:raw', $main); close $fh;
-append($main, obj(type => 'custom-title', customTitle => '演示：Revit 门编号核对（模拟）', sessionId => $id));
-append($main, obj(parentUuid => undef, isSidechain => JSON::PP::false, type => 'user', message => obj(role => 'user', content => '核对门编号'),
-  uuid => 'h1', timestamp => iso(), cwd => '/Users/demo/revit-doors', origin => obj(kind => 'human')));
+append($main, obj(type => 'custom-title', customTitle => '演示：整理发布说明（模拟）', sessionId => $id));
+append($main, obj(parentUuid => undef, isSidechain => JSON::PP::false, type => 'user', message => obj(role => 'user', content => '整理发布说明'),
+  uuid => 'h1', timestamp => iso(), cwd => '/Users/demo/demo-project', origin => obj(kind => 'human')));
 append($main, assistant(content => [ map { tool('TaskCreate', obj(subject => $_)) } @tasks ]));
 
 my @agents = (
-  [0, 'Explore', 'door tags', 'claude-haiku-4-5-20251001', 'Grep'],
+  [0, 'Explore', 'old notes', 'claude-haiku-4-5-20251001', 'Grep'],
   [1, 'general-purpose', 'schema probe', 'claude-sonnet-5-5', 'Bash'],
   [3, 'Explore', 'level map', 'claude-haiku-4-5-20251001', 'Read'],
   [3, 'general-purpose', 'renumber batch', 'claude-opus-5-5', 'Edit'],

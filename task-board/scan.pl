@@ -3,7 +3,9 @@
 # macOS 版：每台 Mac 自带 /usr/bin/perl（5.34，含 JSON::PP），不用另装任何东西。
 # 和 Windows 版 scan.ps1 逐段对应，输出格式完全一样。
 #
-#   perl scan.pl [--once] [--hours 24] [--max 12] [--interval-ms 3000] [--home DIR] [--app DIR]
+#   perl scan.pl [--once] [--hours 24] [--max 12] [--interval-ms 3000] [--shared DIR] [--device NAME] [--home DIR] [--app DIR]
+#   --shared DIR  跨设备共享目录（同步盘里）：每 10 秒把本机快照写成 DIR/<device>.json，每轮读目录里其他电脑的快照附在 remote 里
+#   --device NAME 本机在共享目录里的名字（空 = 主机名，不带域名）
 #   --home / --app 只在测试时用：换掉 ~ 和桌面应用的会话目录。
 use strict;
 use warnings;
@@ -14,10 +16,12 @@ use Time::Local qw(timegm);
 use Time::HiRes qw(time sleep);
 use File::Basename qw(basename dirname);
 use File::Spec;
+use Sys::Hostname qw(hostname);
 
 my ($once, $hours, $max, $intervalMs) = (0, 24, 12, 3000);
 my $home = $ENV{HOME} // (getpwuid($<))[7];
 my $appRoot;
+my ($shared, $device) = ('', '');
 while (@ARGV) {
   my $a = shift @ARGV;
   if ($a eq '--once') { $once = 1 }
@@ -26,6 +30,8 @@ while (@ARGV) {
   elsif ($a eq '--interval-ms') { $intervalMs = 0 + shift @ARGV }
   elsif ($a eq '--home') { $home = shift @ARGV }
   elsif ($a eq '--app') { $appRoot = shift @ARGV }
+  elsif ($a eq '--shared') { $shared = shift @ARGV // '' }
+  elsif ($a eq '--device') { $device = shift @ARGV // '' }
 }
 my $root = "$home/.claude/projects";
 # 全局开关（所有会话共用）：任务板上按一下就改这个文件，各会话的扫描进程每轮都重读
@@ -40,6 +46,17 @@ my $snapPath = "$home/.claude/task-board-snapshot.json";
 my $lastSnap = 0;
 # 桌面应用的会话元数据：cliSessionId（= transcript 文件名）→ 应用里的会话编号、标题、是否已归档
 $appRoot //= "$home/Library/Application Support/Claude/claude-code-sessions";
+# 跨设备共享：本机的名字和系统（卡片上的小标签写 Win / Mac）；共享目录开头的 ~ = 用户主目录
+my $os = 'mac';
+if ($device eq '') { ($device = hostname()) =~ s/\..*//; }
+$shared =~ s{^~(?=/|$)}{$home};
+if ($shared ne '' && !-d $shared) {
+  require File::Path;
+  eval { File::Path::make_path($shared) };
+  $shared = '' unless -d $shared;   # 建不出来（同步盘没装）就当没开
+}
+# 共享目录里的快照超过这么久没更新 = 那台电脑离线，不显示（和插件里的 SNAP_MAX_SEC 一致）
+my $SHARED_MAX_MS = 10 * 60 * 1000;
 
 # 输出走管道给插件读：非 ASCII 一律转成 \uXXXX（和 Windows 版一致，插件那边 JSON.parse 还原）
 my $json = JSON::PP->new->ascii->canonical(0);
@@ -286,6 +303,16 @@ sub mtime_of { my ($p) = @_; my @s = stat($p); return @s ? $s[9] : 0 }
 sub num { my ($v) = @_; return defined $v ? 0 + $v : undef }
 sub str { my ($v) = @_; return defined $v ? '' . $v : '' }
 
+# 先写临时文件再整个换上（rename 是原子的），读的一方不会读到半个文件；几个会话同时写，谁后换上算谁的
+sub swap_in {
+  my ($text, $dest) = @_;
+  my $tmp = "$dest.$$.tmp";
+  open(my $fh, '>:raw', $tmp) or return;
+  print $fh $text;
+  close $fh;
+  rename($tmp, $dest) or unlink $tmp;
+}
+
 do {
   my $now = time();
   my $cut = $now - $hours * 3600;
@@ -476,22 +503,42 @@ do {
   }
   my $usageText = '';
   if (-f $usagePath) { my $t = slurp($usagePath); $usageText = defined $t ? decode('UTF-8', $t) : '' }
+  my $nowMs = int($now * 1000);
   my $line = $json->encode({
-    at => int($now * 1000), sessions => \@out,
+    at => $nowMs, device => $device, os => $os, sessions => \@out,
     prefs => { nextSteps => $nextSteps, hidden => \%hidden }, prefsPath => $prefsPath,
     usagePath => $usagePath, usageText => $usageText, inputDir => $inputDir,
   });
+  my $writeSnap = $now - $lastSnap >= 10;
+  # 跨设备共享：本机快照（不含 remote，不然两边会互相套进去越滚越大）写到共享目录；再读其他电脑的快照
+  if ($shared ne '') {
+    swap_in($line, "$shared/$device.json") if $writeSnap;
+    my @remote;
+    if (opendir(my $dh, $shared)) {
+      for my $name (sort readdir($dh)) {
+        next unless $name =~ /\.json$/ && $name ne "$device.json";
+        my $text = slurp("$shared/$name") // next;
+        $text =~ s/^\s+|\s+$//g;
+        next unless $text =~ /^\{.*\}$/s;
+        my $head = eval { $jsonIn->decode($text) } or next;
+        # 要有本机名和时间；本机名和自己一样的（同步盘的冲突副本）不要；太久没更新的 = 离线，跳过
+        next unless ref $head eq 'HASH' && defined $head->{device} && !ref $head->{device} && $head->{device} ne '' && $head->{device} ne $device;
+        my $at = $head->{at};
+        next unless defined $at && !ref $at && $at =~ /^\d+$/ && $nowMs - $at <= $SHARED_MAX_MS;
+        # 原样附上（共享目录里的快照本来就不含 remote）；不是纯 ASCII 的（别的工具写的）重新编码一遍，输出保持纯 ASCII
+        $text = $json->encode($head) if $text =~ /[^\x00-\x7F]/;
+        push @remote, $text;
+      }
+      closedir $dh;
+    }
+    $line = substr($line, 0, -1) . ',"remote":[' . join(',', @remote) . ']}' if @remote;
+  }
   print STDOUT "$line\n";
   STDOUT->flush();
-  # 快照最多 10 秒写一次；先写临时文件再整个换上，读的一方不会读到半个文件（几个会话同时写，谁后换上算谁的）
-  if ($now - $lastSnap >= 10) {
+  # 本机的共用快照最多 10 秒写一次（带 remote：新会话一启动就能看到别的电脑）
+  if ($writeSnap) {
     $lastSnap = $now;
-    my $tmp = "$snapPath.$$.tmp";
-    if (open(my $fh, '>:raw', $tmp)) {
-      print $fh $line;
-      close $fh;
-      rename($tmp, $snapPath) or unlink $tmp;
-    }
+    swap_in($line, $snapPath);
   }
   sleep($intervalMs / 1000) unless $once;
 } while (!$once);

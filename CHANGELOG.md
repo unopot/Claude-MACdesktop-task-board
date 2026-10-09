@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0
+- **See sessions from your other computers.** Each computer writes a snapshot of its sessions into a shared folder in a synced drive (default: iCloud Drive, `Claude Code/task-board-shared`) every 10 seconds and reads the others'. Cards from another computer carry a grey **Win** / **Mac** tag, show up in the Details pane with "on <computer>", and are read-only (no click-to-switch). Two new settings: **Shared folder for other computers** (empty = off) and **This computer's name in the shared folder** (empty = host name). Snapshots older than 10 minutes count as offline. Works with the matching plugin on the other computer: [Claude-WINdesktop-task-board](https://github.com/unopot/Claude-WINdesktop-task-board) / [Claude-MACdesktop-task-board](https://github.com/unopot/Claude-MACdesktop-task-board).
+- The scanner takes `--shared DIR` and `--device NAME`; its output and the local snapshot carry `device` and `os`, plus `remote` (the other computers' snapshots, verbatim) when sharing is on. The board merges them (`mergeRemote` in `plan.ts`).
+- The platform-specific bits of `register.tsx` (scanner command, home folder, snapshot path, how a `claude://` link is opened, default shared folder) now sit in one block at the top of the file; the rest of the file is identical in the Windows and macOS repositories.
+- `tests/scan.t` grows from 48 to 64 checks: the shared folder is written and read, stale / same-name / broken / temporary files are skipped, the shared copy never nests, `~` expands to the home folder.
+
 ## 2.0.1
 - Cards press down: while the mouse button is held on a clickable card (board or Details pane) it sinks about 4px (margin-top +0.4 rows, margin-bottom −0.4 rows, so the cards below stay put) and its background darkens a touch; it springs back on release. Releasing outside the card cancels the click.
 
