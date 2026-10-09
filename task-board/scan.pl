@@ -5,7 +5,7 @@
 #
 #   perl scan.pl [--once] [--hours 24] [--max 12] [--interval-ms 3000] [--shared DIR] [--device NAME] [--home DIR] [--app DIR]
 #   --shared DIR  跨设备共享目录（同步盘里）：每 10 秒把本机快照写成 DIR/<device>.json，每轮读目录里其他电脑的快照附在 remote 里
-#   --device NAME 本机在共享目录里的名字（空 = 主机名，不带域名）
+#   --device NAME 本机标签（卡片上的灰色小标签，也是共享目录里的文件名；空 = Mac）
 #   --home / --app 只在测试时用：换掉 ~ 和桌面应用的会话目录。
 use strict;
 use warnings;
@@ -16,7 +16,6 @@ use Time::Local qw(timegm);
 use Time::HiRes qw(time sleep);
 use File::Basename qw(basename dirname);
 use File::Spec;
-use Sys::Hostname qw(hostname);
 
 my ($once, $hours, $max, $intervalMs) = (0, 24, 12, 3000);
 my $home = $ENV{HOME} // (getpwuid($<))[7];
@@ -46,9 +45,9 @@ my $snapPath = "$home/.claude/task-board-snapshot.json";
 my $lastSnap = 0;
 # 桌面应用的会话元数据：cliSessionId（= transcript 文件名）→ 应用里的会话编号、标题、是否已归档
 $appRoot //= "$home/Library/Application Support/Claude/claude-code-sessions";
-# 跨设备共享：本机的名字和系统（卡片上的小标签写 Win / Mac）；共享目录开头的 ~ = 用户主目录
+# 跨设备共享：本机标签（用户每台机器各设一个，默认 Mac）和系统；共享目录开头的 ~ = 用户主目录
 my $os = 'mac';
-if ($device eq '') { ($device = hostname()) =~ s/\..*//; }
+$device = 'Mac' if $device eq '';
 $shared =~ s{^~(?=/|$)}{$home};
 if ($shared ne '' && !-d $shared) {
   require File::Path;

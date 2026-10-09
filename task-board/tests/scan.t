@@ -135,7 +135,7 @@ is($got->{prefs}{hidden}{zzzz}, 1790000000000, 'prefs.hidden read from file');
 is($got->{usageText}, "{\"at\":1,\"limits\":[]}\n", 'usageText passed through');
 ok(-f "$home/.claude/task-board-snapshot.json", 'snapshot written');
 is($got->{os}, 'mac', 'os = mac');
-ok(defined $got->{device} && $got->{device} ne '', 'device defaults to the host name');
+is($got->{device}, 'Mac', 'device label defaults to Mac');
 ok(!exists $got->{remote}, 'no --shared: no remote');
 
 my %s = map { $_->{id} => $_ } @{ $got->{sessions} };
@@ -227,7 +227,7 @@ is(scalar @{ $snap->{remote} }, 1, 'the local snapshot includes remote');
 # ~ 展开成 --home；设备名默认主机名
 $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "~/tilde/shared"`;
 $got = JSON::PP->new->utf8->decode($out);
-ok(-f "$home/tilde/shared/$got->{device}.json", '~ in --shared = home; file named after the host');
+ok(-f "$home/tilde/shared/Mac.json", '~ in --shared = home; file named after the label');
 
 sub slurp_t { my ($p) = @_; open(my $fh, '<:raw', $p) or return ''; local $/; my $t = <$fh>; close $fh; return $t }
 
