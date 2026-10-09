@@ -233,6 +233,8 @@ my $rxArch = qr/"isArchived":(true|false)/;
 my $rxAppTitle = qr/"title":"((?:[^"\\]|\\.)*)"/;
 # 应用重启后同一个会话会换一个新的 transcript，旧的 id 记在 priorCliSessionIds 里
 my $rxPrior = qr/"priorCliSessionIds":\[([^\]]*)\]/;
+# Remote Control 的会话编号（session_…）：别的电脑点这张卡时用它打开；开关过几次会有几个，最后一个是现在的
+my $rxBridge = qr/"bridgeSessionIds":\[([^\]]*)\]/;
 
 my %prior;
 sub find_files {
@@ -273,6 +275,8 @@ sub get_desktop_map {
       my ($arch) = $txt =~ $rxArch;
       my ($title) = $txt =~ $rxAppTitle;
       my ($priorList) = $txt =~ $rxPrior;
+      my ($bridgeList) = $txt =~ $rxBridge;
+      my @bridge = defined $bridgeList ? $bridgeList =~ /"((?:cse|session)_[A-Za-z0-9_-]+)"/g : ();
       $c = {
         mtime => $mtime,
         local => $local // '',
@@ -280,6 +284,7 @@ sub get_desktop_map {
         archived => (defined $arch && $arch eq 'true') ? 1 : 0,
         title => defined $title ? unesc($title) : '',
         prior => defined $priorList ? [ $priorList =~ /"([^"]+)"/g ] : [],
+        bridge => @bridge ? $bridge[-1] : '',
       };
       $meta{$f} = $c;
     }
@@ -477,9 +482,10 @@ do {
       my $d = $desk->{$id};
       my $title = ($d && $d->{title} ne '') ? $d->{title} : $st->{title} ne '' ? $st->{title} : $st->{prompt} ne '' ? $st->{prompt} : substr($id, 0, 8);
       my $link = ($d && $d->{local} ne '') ? "claude://claude.ai/epitaxy/$d->{local}" : '';
+      my $bridge = $d ? $d->{bridge} : '';
       my $project = $st->{cwd} ne '' ? basename($st->{cwd}) : '';
       return {
-        id => $id, title => $title, link => $link, project => $project, status => $status,
+        id => $id, title => $title, link => $link, bridge => $bridge, project => $project, status => $status,
         ageSec => int($age), cacheAgeSec => $cacheAge, done => $done, total => $total, current => $current,
         input => $st->{tin} + $sub{tin}, cacheWrite => $st->{tcw} + $sub{tcw}, cacheRead => $st->{tcr} + $sub{tcr}, output => $st->{tout} + $sub{tout},
         subagents => $sub{n}, subActive => $sub{active},

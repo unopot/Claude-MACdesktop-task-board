@@ -99,7 +99,7 @@ push @b, assistant(id => 'msg_b2', model => 'claude-sonnet-5-5', cwd => '/Users/
 put("$proj/bbbb.jsonl", join("\n", @b) . "\n");
 touch("$proj/bbbb.jsonl", $now - 300);
 put("$app/x/y/local_b.json", $J->encode({ sessionId => 'local_bbbb-1', cliSessionId => 'bbbb', isArchived => JSON::PP::false,
-  title => "别的会话 \\ 标题", priorCliSessionIds => ['bbbb-old'] }));
+  title => "别的会话 \\ 标题", priorCliSessionIds => ['bbbb-old'], bridgeSessionIds => ['session_01Old', 'session_01Test'] }));
 # 被 b 接替的旧 transcript：不显示
 put("$proj/bbbb-old.jsonl", $b[0] . "\n");
 touch("$proj/bbbb-old.jsonl", $now - 100);
@@ -174,6 +174,7 @@ ok(!exists $sub->{at}, 'at removed from the output');
 my $b = $s{bbbb};
 is($b->{title}, '别的会话 \\ 标题', 'title from the desktop app wins');
 is($b->{link}, 'claude://claude.ai/epitaxy/local_bbbb-1', 'link from the desktop app');
+is($b->{bridge}, 'session_01Test', 'Remote Control id = the last bridgeSessionIds entry');
 is($b->{status}, 'done', 'end_turn = done');
 is($b->{project}, 'other', 'project');
 is_deeply([ map { [$_->{t}, $_->{s}] } @{ $b->{steps} } ], [['写文档', 'in_progress'], ['提交', 'pending']], 'TodoWrite steps');
@@ -181,6 +182,7 @@ is($b->{current}, '写文档中', 'current = activeForm');
 is($b->{steps}[1]{sec}, -1, 'pending step has no time');
 
 my $d = $s{dddd};
+is($d->{bridge}, '', 'no desktop metadata = no Remote Control id');
 is($d->{title}, '帮我看看', 'title falls back to last-prompt');
 is($d->{status}, 'input', 'needs-input flag newer than the transcript = input');
 
