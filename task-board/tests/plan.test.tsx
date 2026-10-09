@@ -483,3 +483,43 @@ test('收起箭头：灰色细线、不填底色；展开时向下、收起时�
   expect(foldSvg(false)).not.toMatch(/<rect/)
   expect(foldSvg(true)).toMatch(/fill="none" stroke="#8a877f"/)
 })
+
+test('桌面：按住卡片下沉（上边距 +0.4、下边距 -0.4），松开复原并跳转；松开在卡片外则取消', async ($, on) => {
+  const at = Date.now()
+  const board = { at, tick: 1, prefs: { nextSteps: false }, prefsPath: '/Users/u/.claude/task-board-prefs.json', sessions: [row('b', '本会话', 'running', 5), row('c', '别的会话', 'done', 600)] }
+  on('ui.render', async ($$, e) => {
+    const { Box } = $$.ui.resolve(e)
+    return <Box />
+  })
+  on('state.get', async (_$, e, next) => {
+    if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
+    if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'b', version: 1 } }
+    return next(e)
+  })
+  on('ui.log', async () => ({ value: undefined }))
+  const toasts: string[] = []
+  on('ui.toast', async (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('process.run', async () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  const ui = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
+  const card = async () => (await ui.find({ key: 'row-c' })) as { props: { marginTop?: number; marginBottom?: number } } | undefined
+  expect((await card())?.props.marginTop).toBe(1)
+  // 按下：下沉
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'go-c' })
+  expect((await card())?.props.marginTop).toBe(1.4)
+  expect((await card())?.props.marginBottom).toBe(-0.4)
+  expect(toasts.length).toBe(0)
+  // 在卡片外松开：复原，不跳转
+  await ui.pointer({ type: 'up', x: -5, y: 0, button: 'left', in: 'go-c' })
+  expect((await card())?.props.marginTop).toBe(1)
+  expect(toasts.length).toBe(0)
+  // 按下再在卡片内松开：复原并跳转
+  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'go-c' })
+  await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'go-c' })
+  expect((await card())?.props.marginTop).toBe(1)
+  expect(toasts.some(t => t.includes('Switching to "别的会话"'))).toBe(true)
+  // 本会话的卡不可点，也不下沉
+  expect(await ui.find({ key: 'go-b' })).toBeUndefined()
+})

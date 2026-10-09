@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.0.1
+- Cards press down: while the mouse button is held on a clickable card (board or Details pane) it sinks about 4px (margin-top +0.4 rows, margin-bottom −0.4 rows, so the cards below stay put) and its background darkens a touch; it springs back on release. Releasing outside the card cancels the click.
+
 ## 2.0.0 (macOS)
 - macOS port of [Claude-WINdesktop-task-board](https://github.com/unopot/Claude-WINdesktop-task-board) 1.9.7. Same board, same details panel, same settings.
 - The background scanner is now `scan.pl`, a Perl script: every Mac ships `/usr/bin/perl` with `JSON::PP`, so nothing needs installing. Its first pass over a 35 MB transcript takes well under a second.

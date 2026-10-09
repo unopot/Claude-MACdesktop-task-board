@@ -91,7 +91,7 @@ export type NextView =
 
 declare module 'claude-code' {
   interface PluginState {
-    /** expanded = Running 栏里展开了明细的会话 id（'' = 都收起）；usage = 本会话自己最近一次读到的账号用量；fold = 任务板收起了没有 */
-    'task-board': { board: Board; me: string; showAll: boolean; next: NextView; expanded: string; usage: Usage; fold: Fold }
+    /** expanded = Running 栏里展开了明细的会话 id（'' = 都收起）；usage = 本会话自己最近一次读到的账号用量；fold = 任务板收起了没有；pressed = 鼠标正按着的卡片（按下下沉） */
+    'task-board': { board: Board; me: string; showAll: boolean; next: NextView; expanded: string; usage: Usage; fold: Fold; pressed: string }
   }
 }

@@ -20,6 +20,8 @@ const expanded = atom({ plugin: 'task-board', key: 'expanded' } as const, '')
 const usage = atom({ plugin: 'task-board', key: 'usage' } as const, { at: 0, limits: [] } as Usage)
 /** 任务板收起了没有（本会话）；没记过的读 $.store 里上次的选择，再没有就用默认。 */
 const fold = atom({ plugin: 'task-board', key: 'fold' } as const, {} as Fold)
+/** 鼠标正按着的卡片 id（'' = 没有）：按下下沉约 4px，松开复原。 */
+const pressed = atom({ plugin: 'task-board', key: 'pressed' } as const, '')
 
 /** 多久没动静就从“活跃”里收起（运行中 / 待处理的会话始终显示）。 */
 const ACTIVE_SEC = 60 * 60
@@ -290,6 +292,9 @@ const ACCENT = '#d97757'
 /** 扁平悬停：边框加深一点、底色淡淡一层（keyed Box 的 hover，不走钩子）。 */
 const HOVER = { borderDimColor: false, borderColor: '#8a877f', backgroundColor: 'rgba(138,135,127,0.10)' }
 const HOVER_BG = { backgroundColor: 'rgba(138,135,127,0.12)' }
+/** 按下：卡片下沉几行（0.4 行 ≈ 4px）、底色再深一点。 */
+const PRESS_ROWS = 0.4
+const PRESS_BG = 'rgba(138,135,127,0.18)'
 /** 本会话卡片：淡橙底；Current 标签底色稍深一点。 */
 const ACCENT_TINT = 'rgba(217,119,87,0.07)'
 const ACCENT_BG = 'rgba(217,119,87,0.16)'
@@ -957,11 +962,13 @@ export const register: Register = (on, options) => {
 
     // 两栏：左栏正在跑（运行中 / 待处理），右栏已完成；每个会话一行、一个浅框，整行可点跳到该会话
     const { Box, Text, Svg, Client } = $.ui.resolve(e)
-    const hit = (key: string, a: string) => (
+    // p = 按下时下沉的卡片 id（整卡可点的点击层带上；小图标按钮不带）
+    const hit = (key: string, a: string, p?: string) => (
       <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-        <Client key={key} module="./hit.tsx" props={{ a }} width="100%" height="100%" />
+        <Client key={key} module="./hit.tsx" props={p === undefined ? { a } : { a, p }} width="100%" height="100%" />
       </Box>
     )
+    const down = await read($, pressed)
     // 收起：一行摘要 + 用量 + 右端的展开箭头；这一行放在最底下（下一步建议在它上面），箭头永远在最右下角
     if (await isFolded($, 'desktop')) {
       const five = limitNow(freshest(await read($, usage), b.usage), 'five_hour', b.at)
@@ -1015,6 +1022,8 @@ export const register: Register = (on, options) => {
       const isSelf = s.id === self
       const isOpen = kind === 'live' && s.id === open
       const t = elapsed(s)
+      // 鼠标按着这张卡：整卡下沉约 4px（上边距 +0.4 行、下边距 -0.4 行，下面的卡不动），底色稍深
+      const isDown = !isSelf && down === s.id
       return (
         <Box
           key={`row-${s.id}`}
@@ -1022,13 +1031,14 @@ export const register: Register = (on, options) => {
           // 带边框的 Box 桌面上会自动加约 10px 的上下内边距；显式给 0.5 行单位（约 5px）盖掉它
           paddingY={0.5}
           paddingX={1}
-          marginTop={1}
+          marginTop={isDown ? 1 + PRESS_ROWS : 1}
+          marginBottom={isDown ? -PRESS_ROWS : undefined}
           width="100%"
           borderStyle="round"
-          borderDimColor={!isSelf && !isOpen}
-          borderColor={isSelf ? ACCENT : isOpen ? BLUE_LINE : undefined}
-          backgroundColor={isSelf ? ACCENT_TINT : undefined}
-          hover={isSelf ? undefined : HOVER}
+          borderDimColor={!isSelf && !isOpen && !isDown}
+          borderColor={isSelf ? ACCENT : isOpen ? BLUE_LINE : isDown ? HOVER.borderColor : undefined}
+          backgroundColor={isSelf ? ACCENT_TINT : isDown ? PRESS_BG : undefined}
+          hover={isSelf || isDown ? undefined : HOVER}
         >
           <Box flexDirection="row" alignItems="center" gap={1}>
             <Box position="relative" flexDirection="row" alignItems="center" gap={1} flexGrow={1} minWidth={0}>
@@ -1049,7 +1059,7 @@ export const register: Register = (on, options) => {
                   <Text dimColor> · {fmt(billed(s))}</Text>
                 </Text>
               </Box>
-              {!isSelf && hit(`go-${s.id}`, `go:${s.id}`)}
+              {!isSelf && hit(`go-${s.id}`, `go:${s.id}`, s.id)}
             </Box>
             {kind === 'live' ? (
               <Box key={`xb-${s.id}`} position="relative" flexShrink={0} hover={HOVER_BG}>
@@ -1066,7 +1076,7 @@ export const register: Register = (on, options) => {
           {/* 纵向排列的 Box 会把里面的 Svg 图片拉满整宽（横向排列时图片只有默认宽度） */}
           <Box position="relative" flexDirection="column">
             <Svg source={lineSvg(st.frac, st.color)} alt={`${s.title}: ${st.text}`} height={6} />
-            {!isSelf && hit(`go2-${s.id}`, `go:${s.id}`)}
+            {!isSelf && hit(`go2-${s.id}`, `go:${s.id}`, s.id)}
           </Box>
         </Box>
       )
@@ -1319,8 +1329,14 @@ export const register: Register = (on, options) => {
   // 桌面上所有可点的东西都是透明点击层（hit.tsx）发来的消息
   on('ui.message', async ($, e, next) => {
     if (!e.module.endsWith('hit.tsx')) return next(e)
-    const data = (e.data ?? {}) as { a?: unknown; t?: unknown }
+    const data = (e.data ?? {}) as { a?: unknown; t?: unknown; p?: unknown }
     const a = data.a
+    // 按下：记下哪张卡下沉；松开（不管在不在卡上）先复原，再看要不要触发
+    if (a === 'press') {
+      if (typeof data.p === 'string') await update($, pressed, () => data.p as string)
+      return {}
+    }
+    if (typeof data.p === 'string') await update($, pressed, x => (x === data.p ? '' : x))
     if (a === 'pick-text' && typeof data.t === 'string') await pick($, { label: '', prompt: data.t })
     else if (typeof a === 'string' && a !== 'noop') await act($, a)
     return {}
@@ -1373,11 +1389,12 @@ export const register: Register = (on, options) => {
     if (e.surface === 'desktop') {
       const { Box, Text, Svg, Client } = $.ui.resolve(e)
       const isOn = nextOn(b)
-      const hit = (key: string, a: string) => (
+      const hit = (key: string, a: string, p?: string) => (
         <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-          <Client key={key} module="./hit.tsx" props={{ a }} width="100%" height="100%" />
+          <Client key={key} module="./hit.tsx" props={p === undefined ? { a } : { a, p }} width="100%" height="100%" />
         </Box>
       )
+      const down = await read($, pressed)
       return (
         <Box flexDirection="column" paddingX={1}>
           <Box flexDirection="row" flexWrap="wrap" justifyContent="space-between" alignItems="center" columnGap={2}>
@@ -1404,17 +1421,19 @@ export const register: Register = (on, options) => {
 
             const frac = s.status === 'input' ? 1 : s.total > 0 ? s.done / s.total : s.status === 'done' || s.status === 'waiting' ? 1 : 0
             // 三行：标题 + 标签 + 右侧状态 / 副标题 / 整宽进度线。进度线每行一样长，窄的时候也不会被挤掉
+            const isDown = canGo && down === s.id
             return (
               <Box
                 key={`pane-row-${s.id}`}
                 flexDirection="column"
-                marginTop={1}
+                marginTop={isDown ? 1 + PRESS_ROWS : 1}
+                marginBottom={isDown ? -PRESS_ROWS : undefined}
                 paddingX={1}
                 borderStyle="round"
-                borderDimColor={!isSelf}
-                borderColor={isSelf ? ACCENT : undefined}
-                backgroundColor={isSelf ? ACCENT_TINT : undefined}
-                hover={canGo ? HOVER : undefined}
+                borderDimColor={!isSelf && !isDown}
+                borderColor={isSelf ? ACCENT : isDown ? HOVER.borderColor : undefined}
+                backgroundColor={isSelf ? ACCENT_TINT : isDown ? PRESS_BG : undefined}
+                hover={canGo && !isDown ? HOVER : undefined}
               >
                 <Box flexDirection="row" alignItems="center" gap={1}>
                   <Box position="relative" flexDirection="row" alignItems="center" gap={1} flexGrow={1}>
@@ -1438,7 +1457,7 @@ export const register: Register = (on, options) => {
                         <Text dimColor> · {fmt(billed(s))} tok</Text>
                       </Text>
                     </Box>
-                    {canGo && hit(`pane-go-${s.id}`, `go:${s.id}`)}
+                    {canGo && hit(`pane-go-${s.id}`, `go:${s.id}`, s.id)}
                   </Box>
                   {hid && (
                     <Box key={`pane-unhide-${s.id}`} position="relative" flexShrink={0} paddingX={1} hover={HOVER_BG}>
@@ -1450,7 +1469,7 @@ export const register: Register = (on, options) => {
                 <Box position="relative" flexDirection="column">
                   <Text dimColor wrap="truncate-end">{subtitle(s)}</Text>
                   <Svg source={lineSvg(frac, HEX[s.status])} alt={`${s.title}: ${right(s)}`} height={6} />
-                  {canGo && hit(`pane-go2-${s.id}`, `go:${s.id}`)}
+                  {canGo && hit(`pane-go2-${s.id}`, `go:${s.id}`, s.id)}
                 </Box>
               </Box>
             )
