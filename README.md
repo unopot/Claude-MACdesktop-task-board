@@ -37,7 +37,7 @@ The board lives above the prompt of a session, so you only see it while a sessio
 
 - A coloured count in the macOS menu bar: **yellow** = needs input, **blue** = running or waiting, **green** = done (the same sessions the board lists: finished within the last hour with the cache still warm, hidden ones left out). A grey dot when there is nothing.
 - Click it for the list: one row per session with a coloured dot, title, state, project and time; sessions from another computer carry its label. Click a row to switch to that session (one from another computer opens through Remote Control, as on the board).
-- It starts by itself when a session opens and keeps running after the session closes; only one runs at a time. **Quit Task Board menu** stops it until the next session opens; switch **Menu bar counter** off in the settings to keep it off.
+- It starts by itself when a session opens and keeps running after the session closes; only one runs at a time. It has no Quit item: switch **Menu bar counter** off in the settings to stop it.
 - It is a plain script run by the system's own `osascript` (`menubar.js`), with its own copy of the scanner, so nothing to build or install.
 
 If you cannot see it: on a MacBook with a notch, a crowded menu bar hides the leftmost icons behind the notch (look on an external display, or ⌘-drag other icons out); and in **System Settings › Menu Bar**, allow **osascript** in the menu bar.
@@ -176,7 +176,7 @@ claude plugin uninstall task-board@unopot-mac-mods
 claude plugin marketplace remove unopot-mac-mods
 ```
 
-Uninstalling leaves a running menu bar counter until it notices its files are gone (a few seconds); **Quit Task Board menu** stops it at once.
+Uninstalling leaves a running menu bar counter until it notices its files are gone (a few seconds).
 
 ## Development
 

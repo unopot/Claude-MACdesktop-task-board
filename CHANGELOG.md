@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.3.1
+- The menu bar counter has no **Quit** item any more: quitting it kept it away until the next session started, which looked like it was gone. Switch **Menu bar counter** off in the settings to stop it.
+
 ## 2.3.0
 - **Menu bar counter.** A coloured count in the macOS menu bar (yellow needs input, blue running, green done) that is there even when no session is open, or while a Remote Control session from another computer is open. Click it for the sessions, click one to switch to it. A plain `osascript` script (`menubar.js`), started by `menubar.pl` when a session opens, detached and one at a time; new setting **Menu bar counter** (on by default) turns it off.
 - The scanner (`scan.pl`) takes `--latest FILE`: each round's line is written to that file atomically (the menu bar reads it).

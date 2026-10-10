@@ -198,7 +198,6 @@ function run(argv) {
           if (link) $.NSWorkspace.sharedWorkspace.openURL($.NSURL.URLWithString(link))
         },
       },
-      'quit:': { types: ['void', ['id']], implementation: () => quit() },
       'menuNeedsUpdate:': { types: ['void', ['id']], implementation: menu => fill(menu) },
     },
   })
@@ -234,9 +233,7 @@ function run(argv) {
     const status = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(age < 0 ? 'Waiting for the first scan…' : age < 60 ? `Updated ${age} s ago` : `Last update ${Math.round(age / 60)} min ago — scanner stalled?`, null, '')
     status.enabled = false
     menu.addItem(status)
-    const q = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent('Quit Task Board menu', 'quit:', 'q')
-    q.target = target
-    menu.addItem(q)
+    // 没有 Quit：关掉要去设置项 Menu bar counter（点了 Quit 要等下一个会话才回来，用户不要）
   }
 
   const menu = $.NSMenu.alloc.init
