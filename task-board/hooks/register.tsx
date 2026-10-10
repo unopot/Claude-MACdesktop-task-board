@@ -1373,8 +1373,6 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const hiddenN = b.sessions.filter(s => isActive(s) && isHidden(b.prefs, b.at, s)).length
-
     // 账号 5 小时额度（设置页 Usage 里的 Current session）：小圆环 + 百分比 + 离重置多久，靠 Running 标题行右侧
     const u = freshest(await read($, usage), b.usage)
     const five = limitNow(u, 'five_hour', b.at)
@@ -1426,12 +1424,12 @@ export const register: Register = (on, options) => {
                 <Text dimColor wrap="truncate-end">{finished.length}</Text>
               </Box>
             </Box>
-            {/* 开关不压缩；Details 可以让位（被挤时截断）。Done 后面只写个数（不写 cache left），Mac 的窗口窄 */}
-            <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0}>
+            {/* 开关和 Details 都不压缩。Mac 的窗口窄：Done 后面只写个数（不写 cache left），Details 只画三个点（点开的详情窗里有隐藏的会话） */}
+            <Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
               {toggle}
               {phoneToggle}
-              <Box key="details-link" position="relative" paddingX={1} hover={HOVER_BG} flexShrink={1} minWidth={0} overflow="hidden">
-                <Text dimColor wrap="truncate-end">{details.label}{hiddenN > 0 ? ` · ${hiddenN} hidden` : ''}</Text>
+              <Box key="details-link" position="relative" paddingX={1} hover={HOVER_BG} flexShrink={0}>
+                <Text bold dimColor>⋯</Text>
                 {hit('hit-details', 'details')}
               </Box>
             </Box>

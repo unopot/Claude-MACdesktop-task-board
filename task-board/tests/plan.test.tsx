@@ -97,9 +97,11 @@ test('任务板：本会话有 Current 标记，展开明细，隐藏已完成�
   const ui = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
   // 本会话（b）有 Current 标签，别的没有
   expect(await ui.find({ type: 'Text', text: /^ Current $/ })).toBeDefined()
-  // 已隐藏的 e 不在任务板上，Details 旁边显示数量
+  // 已隐藏的 e 不在任务板上；Details 在横条上只画三个点（Mac 的窗口窄）
   expect(await ui.find({ key: 'row-e' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /Details · 1 hidden/ })).toBeDefined()
+  expect(await ui.find({ key: 'details-link' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^⋯$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Details/ })).toBeUndefined()
   // Running 行显示总耗时
   expect(await ui.find({ type: 'Text', text: /⏱ 12:04/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^33%$/ })).toBeDefined()

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.4.3
+- **Details** on the desktop board is a three-dot button (⋯) that never gets cut off; the hidden count moved out of it (the Details pane still lists hidden sessions).
+
 ## 2.4.2
 - The Done header on the desktop board shows just the count (no "· cache left"): the Mac window is narrow and the two switches need the room. Each card still shows its own cache countdown.
 
