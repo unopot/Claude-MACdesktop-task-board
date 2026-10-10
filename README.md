@@ -30,6 +30,7 @@ Interactions:
 - The arrow on a running card opens its details above the board: a stage strip, one row per step with its time, subagents under the step that started them (type, model, effort, current tool, task, tool calls, time), and a **Main** row with the session's own model and effort ("no subagents this turn" when there are none).
 - The eye icon on a finished card hides it; it comes back by itself when that session gets a new request. **Details** (or `/task-board`) opens a pane listing every recent session, hidden ones included, with **Unhide**.
 - **Next step** (on until you switch it off; one switch for all sessions): after each answer, fork the session once to propose three next prompts; clicking one fills the prompt box and never sends it. It costs one extra request per turn, so switch it off on the board if you do not want that.
+- **iPhone Live** (only with the TaskBoard iPhone Live Activity pusher installed on this computer): shows or hides the session cards on the iPhone lock screen and Dynamic Island, for whichever computer is pushing. Same switch as the one in the iPhone app.
 
 ## Menu bar counter
 

@@ -39,6 +39,8 @@ my $root = "$home/.claude/projects";
 my $prefsPath = "$home/.claude/task-board-prefs.json";
 # 账号用量（5 小时 / 每周额度）：哪个会话拿到新读数就写这里，扫描进程原样转给所有会话
 my $usagePath = "$home/.claude/task-board-usage.json";
+# iPhone Live 推送器的配置：本机有它（并且开了共享）才读手机显示开关、在任务板上画「iPhone Live」开关
+my $livePath = "$home/.claude/task-board-live.json";
 # “在等我决定”的标记：每个会话一个文件（文件名 = 会话 id，内容 = 标记时间毫秒，空 = 没在等）
 my $inputDir = "$home/.claude/task-board-input";
 mkdir $inputDir unless -d $inputDir;
@@ -510,11 +512,20 @@ do {
   }
   my $usageText = '';
   if (-f $usagePath) { my $t = slurp($usagePath); $usageText = defined $t ? decode('UTF-8', $t) : '' }
+  # 手机显示开关（共享目录里的 phone-live.conf：手机设置页和电脑任务板都写，两台的推送器都照它）；文件不存在或读不懂 = 显示
+  my $phone;
+  if ($shared ne '' && -f $livePath) {
+    my $path = "$shared/phone-live.conf";
+    my $p = -f $path ? eval { $jsonIn->decode(slurp($path) // '') } : undef;
+    my $off = ref $p eq 'HASH' && defined $p->{show} && !$p->{show};
+    $phone = { show => ($off ? JSON::PP::false : JSON::PP::true), path => $path };
+  }
   my $nowMs = int($now * 1000);
   my $line = $json->encode({
     at => $nowMs, device => $device, os => $os, sessions => \@out,
     prefs => { nextSteps => $nextSteps, hidden => \%hidden }, prefsPath => $prefsPath,
     usagePath => $usagePath, usageText => $usageText, inputDir => $inputDir,
+    ($phone ? (phone => $phone) : ()),
   });
   my $writeSnap = $now - $lastSnap >= 10;
   # 跨设备共享：本机快照（不含 remote，不然两边会互相套进去越滚越大）写到共享目录；再读其他电脑的快照

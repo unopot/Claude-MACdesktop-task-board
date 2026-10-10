@@ -74,10 +74,15 @@ export type Board = {
   usage?: Usage
   /** “在等我决定”标记文件所在的目录（每个会话一个文件，文件名 = 会话 id），由扫描进程给出 */
   inputDir?: string
+  /** iPhone Live 的显示开关（共享目录里的 phone-live.conf，手机和电脑共用）；本机没装推送器或没开共享时没有，任务板不画这个开关 */
+  phone?: PhoneSwitch
 }
 
+/** show = 锁屏和灵动岛上显示不显示（文件不存在 = 显示）；path = phone-live.conf 的绝对路径 */
+export type PhoneSwitch = { show: boolean; path: string }
+
 /** 扫描进程输出的一行（也是共用快照 ~/.claude/task-board-snapshot.json 的内容）；usageText = 用量文件原文 */
-export type ScanLine = Pick<Board, 'at' | 'sessions' | 'prefs' | 'prefsPath' | 'usagePath' | 'inputDir'> & {
+export type ScanLine = Pick<Board, 'at' | 'sessions' | 'prefs' | 'prefsPath' | 'usagePath' | 'inputDir' | 'phone'> & {
   usageText?: string
   /** 本机标签（设置项 deviceName；共享目录里的文件名）和系统（win / mac） */
   device?: string

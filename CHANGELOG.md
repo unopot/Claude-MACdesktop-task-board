@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.4.0
+- **iPhone Live switch** next to **Next step** on the board (and in the Details pane and the phone layout), for people who run the TaskBoard iPhone Live Activity pusher. It only shows when this computer has the pusher's config (`~/.claude/task-board-live.json`) and a shared folder is set, so nobody else sees it. It writes `phone-live.conf` in the shared folder — the same file as the iPhone app's own switch — so whichever computer is pushing ends the lock screen and Dynamic Island cards, or brings them back.
+- The scanner (`scan.pl`) reads `phone-live.conf` in that case and passes it on as `phone` (`show`, `path`).
+- `tests/scan.t` grows from 68 to 75 checks (the switch shows only with the pusher's config and a shared folder; off / missing / unreadable file; it is never read as a snapshot); a new UI test covers the switch on the desktop board, the phone layout and the Details pane.
+
 ## 2.3.1
 - The menu bar counter has no **Quit** item any more: quitting it kept it away until the next session started, which looked like it was gone. Switch **Menu bar counter** off in the settings to stop it.
 
