@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.4.2
+- The Done header on the desktop board shows just the count (no "· cache left"): the Mac window is narrow and the two switches need the room. Each card still shows its own cache countdown.
+
 ## 2.4.1
 - The **iPhone Live** switch is this computer's own: it is saved as `liveActivity` in `~/.claude/task-board-prefs.json`, which the pusher already reads, instead of writing the iPhone app's `phone-live.conf`. The two switches stay separate — the cards are pushed only when both this switch and the one in the iPhone app are on. It shows whenever the pusher's config is there (no shared folder needed).
 - The two switches on the board are just a name and a slider now (no **On** / **Off** text), so the Done header has more room. The Details pane keeps the text.

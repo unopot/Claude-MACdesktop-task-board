@@ -1423,10 +1423,10 @@ export const register: Register = (on, options) => {
             <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
               <Text bold>Done</Text>
               <Box flexShrink={1} minWidth={0} overflow="hidden">
-                <Text dimColor wrap="truncate-end">{finished.length} · cache left</Text>
+                <Text dimColor wrap="truncate-end">{finished.length}</Text>
               </Box>
             </Box>
-            {/* 开关不压缩；Details 可以让位（被挤时截断），把宽度留给 cache left */}
+            {/* 开关不压缩；Details 可以让位（被挤时截断）。Done 后面只写个数（不写 cache left），Mac 的窗口窄 */}
             <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0}>
               {toggle}
               {phoneToggle}
