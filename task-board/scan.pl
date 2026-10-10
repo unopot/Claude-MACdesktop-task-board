@@ -3,9 +3,10 @@
 # macOS 版：每台 Mac 自带 /usr/bin/perl（5.34，含 JSON::PP），不用另装任何东西。
 # 和 Windows 版 scan.ps1 逐段对应，输出格式完全一样。
 #
-#   perl scan.pl [--once] [--hours 24] [--max 12] [--interval-ms 3000] [--shared DIR] [--device NAME] [--home DIR] [--app DIR]
+#   perl scan.pl [--once] [--hours 24] [--max 12] [--interval-ms 3000] [--shared DIR] [--device NAME] [--latest FILE] [--home DIR] [--app DIR]
 #   --shared DIR  跨设备共享目录（同步盘里）：每 10 秒把本机快照写成 DIR/<device>.json，每轮读目录里其他电脑的快照附在 remote 里
 #   --device NAME 本机标签（卡片上的灰色小标签，也是共享目录里的文件名；空 = Mac）
+#   --latest FILE 每一轮把输出的那一行（含 remote）原子地写进 FILE：菜单栏（menubar.js）读它，不用等 10 秒一次的共用快照
 #   --home / --app 只在测试时用：换掉 ~ 和桌面应用的会话目录。
 use strict;
 use warnings;
@@ -20,7 +21,7 @@ use File::Spec;
 my ($once, $hours, $max, $intervalMs) = (0, 24, 12, 3000);
 my $home = $ENV{HOME} // (getpwuid($<))[7];
 my $appRoot;
-my ($shared, $device) = ('', '');
+my ($shared, $device, $latest) = ('', '', '');
 while (@ARGV) {
   my $a = shift @ARGV;
   if ($a eq '--once') { $once = 1 }
@@ -31,6 +32,7 @@ while (@ARGV) {
   elsif ($a eq '--app') { $appRoot = shift @ARGV }
   elsif ($a eq '--shared') { $shared = shift @ARGV // '' }
   elsif ($a eq '--device') { $device = shift @ARGV // '' }
+  elsif ($a eq '--latest') { $latest = shift @ARGV // '' }
 }
 my $root = "$home/.claude/projects";
 # 全局开关（所有会话共用）：任务板上按一下就改这个文件，各会话的扫描进程每轮都重读
@@ -540,6 +542,7 @@ do {
   }
   print STDOUT "$line\n";
   STDOUT->flush();
+  swap_in($line, $latest) if $latest ne '';
   # 本机的共用快照最多 10 秒写一次（带 remote：新会话一启动就能看到别的电脑）
   if ($writeSnap) {
     $lastSnap = $now;

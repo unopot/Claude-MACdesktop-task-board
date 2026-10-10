@@ -19,6 +19,12 @@ const scanArgv = (script: string, shared: string, device: string) => [
 /** 用户主目录（$.env.get 的变量名必须写成字面量），和共用快照的路径。 */
 const homeOf = ($: EngineInterface) => $.env.get('HOME')
 const snapshotPath = (home: string) => `${home}/.claude/task-board-snapshot.json`
+/** 菜单栏（menubar.js，osascript 跑）的启动器：start 时已有同一份在跑就不动，脱离会话运行；stop 停掉。 */
+const MENUBAR_LAUNCHER = 'menubar.pl'
+const menubarArgv = (root: string, ttlMin: number, shared: string, device: string) => [
+  '/usr/bin/perl', `${root}/${MENUBAR_LAUNCHER}`, 'start', `${root}/menubar.js`, `${root}/${SCAN_SCRIPT}`, String(ttlMin), shared, device,
+]
+const menubarStopArgv = (root: string) => ['/usr/bin/perl', `${root}/${MENUBAR_LAUNCHER}`, 'stop']
 /** 交给 macOS 的 open 打开 claude:// 链接，Claude 应用会切到对应会话。 */
 const openArgv = (link: string) => ['/usr/bin/open', link]
 /** 本机标签的默认值（设置项 deviceName 为空时用）：卡片上的灰色小标签、共享目录里的文件名都用它；有几台机器就各设各的。 */
@@ -50,6 +56,8 @@ let WARN_SEC = 5 * 60
 /** 跨设备共享目录（空 = 不共享）和本机标签（卡片标签 + 共享目录里的文件名；空 = 平台默认），register 时按插件选项设置，传给扫描进程。 */
 let SHARED_DIR = ''
 let DEVICE = ''
+/** 菜单栏开关（设置项 menuBar，默认开） */
+let MENU_BAR = true
 
 /** 缓存还剩几秒：从主 transcript 最后一次请求起算；没有请求过返回 null。 */
 const cacheLeft = (s: SessionRow) => (s.cacheAgeSec >= 0 ? TTL_SEC - s.cacheAgeSec : null)
@@ -170,6 +178,24 @@ async function publishStatus($: EngineInterface) {
   const running = b.sessions.filter(s => s.status === 'running').length
   const tokens = b.sessions.reduce((n, s) => n + billed(s), 0)
   await $.ui.status(`${running} running / ${b.sessions.length} sessions · ${fmt(tokens)} tok`)
+}
+
+/** 本模块这次加载里已经确认过菜单栏（开着就确保在跑，关着就停掉），不用每次连上都再跑一遍启动器。 */
+let menubarChecked = false
+
+/** 菜单栏：设置项开着就确保在跑（启动器只留一个、脱离会话），关着就停掉。失败只记日志。 */
+async function ensureMenubar($: EngineInterface) {
+  if (menubarChecked) return
+  menubarChecked = true
+  try {
+    const script = await scriptPath($)
+    const root = script.slice(0, script.length - SCAN_SCRIPT.length - 1)
+    const r = await $.process.run(MENU_BAR ? menubarArgv(root, TTL_SEC / 60, SHARED_DIR, DEVICE) : menubarStopArgv(root))
+    if (r.exitCode !== 0) $.ui.log(`task-board: menu bar launcher exited ${r.exitCode}`, { to: 'debug' })
+  } catch (err) {
+    menubarChecked = false
+    $.ui.log(`task-board: menu bar launcher failed: ${String(err)}`, { to: 'debug' })
+  }
 }
 
 async function scriptPath($: EngineInterface) {
@@ -623,6 +649,7 @@ export const register: Register = (on, options) => {
   WARN_SEC = Math.max(0, typeof options?.cacheWarnMinutes === 'number' ? options.cacheWarnMinutes : 5) * 60
   SHARED_DIR = typeof options?.sharedDir === 'string' ? options.sharedDir.trim() : DEFAULT_SHARED
   DEVICE = (typeof options?.deviceName === 'string' ? options.deviceName.trim() : '') || DEFAULT_DEVICE
+  MENU_BAR = options?.menuBar !== false
   const nx = nextOptions(options)
 
   // 新一轮开始（打字或别的方式）就收起旧建议。
@@ -671,7 +698,10 @@ export const register: Register = (on, options) => {
     void seedFromSnapshot($).catch(() => undefined)
     // 没有界面的会话（claude -p、SDK 后台任务）不起扫描进程；桌面界面往往晚于 session.start 才连上，
     // 所以连上时（session.attach）和第一次要画横条时还会再补启动
-    if ((await $.session.surfaces()).length > 0) void watch($)
+    if ((await $.session.surfaces()).length > 0) {
+      void watch($)
+      void ensureMenubar($)
+    }
     return next(e)
   })
 
@@ -705,6 +735,7 @@ export const register: Register = (on, options) => {
   on('session.attach', async ($, e, next) => {
     void seedFromSnapshot($).catch(() => undefined)
     void watch($)
+    void ensureMenubar($)
     // 续上的会话可能已经有用量读数了：先显示出来
     void $.session.usage().then(x => saveUsage($, x.rateLimits)).catch(() => undefined)
     return next(e)

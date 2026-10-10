@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.3.0
+- **Menu bar counter.** A coloured count in the macOS menu bar (yellow needs input, blue running, green done) that is there even when no session is open, or while a Remote Control session from another computer is open. Click it for the sessions, click one to switch to it. A plain `osascript` script (`menubar.js`), started by `menubar.pl` when a session opens, detached and one at a time; new setting **Menu bar counter** (on by default) turns it off.
+- The scanner (`scan.pl`) takes `--latest FILE`: each round's line is written to that file atomically (the menu bar reads it).
+- `tests/scan.t` grows from 66 to 68 checks (`--latest`); `tests/menubar.test.tsx` covers starting it from a desktop session, stopping it when the setting is off, and leaving it alone in sessions with no window.
+
 ## 2.2.0
 - **Open sessions from your other computers.** Clicking a card from another computer opens that session through Remote Control (`claude://claude.ai/code/session_…`); the desktop app opens it as a Remote Control session. It needs Remote Control on for that session on its own computer (desktop app setting **Connect new sessions to Remote Control**). Cards from a computer still on 2.1.x carry no Remote Control id and stay read-only. Same in the Details pane.
 - The scanner (`scan.pl`) reads each session's Remote Control id (the last entry of `bridgeSessionIds` in the desktop app's session list) and writes it as `bridge`, so the snapshot in the shared folder carries it.

@@ -230,6 +230,10 @@ is(scalar @{ $snap->{remote} }, 1, 'the local snapshot includes remote');
 $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "~/tilde/shared"`;
 $got = JSON::PP->new->utf8->decode($out);
 ok(-f "$home/tilde/shared/Mac.json", '~ in --shared = home; file named after the label');
+# --latest：每一轮的输出行原样写进文件（菜单栏读它）
+$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --latest "$home/latest.json"`;
+is(slurp_t("$home/latest.json"), $out =~ s/\n\z//r, '--latest holds the line just printed');
+ok(!glob("$home/latest.json.*.tmp"), '--latest leaves no temporary file');
 
 sub slurp_t { my ($p) = @_; open(my $fh, '<:raw', $p) or return ''; local $/; my $t = <$fh>; close $fh; return $t }
 
