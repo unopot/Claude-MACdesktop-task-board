@@ -235,22 +235,18 @@ $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --latest "$home
 is(slurp_t("$home/latest.json"), $out =~ s/\n\z//r, '--latest holds the line just printed');
 ok(!glob("$home/latest.json.*.tmp"), '--latest leaves no temporary file');
 
-# ── iPhone Live 开关：本机有推送器配置（~/.claude/task-board-live.json）且开了共享，才给出 phone（读共享目录的 phone-live.conf）──
-ok(!exists $got->{phone}, 'no pusher config: no phone switch');
+# ── iPhone Live 开关：本机有推送器配置（~/.claude/task-board-live.json）才给出 livePusher；开关本身是开关文件里的 liveActivity ──
+ok(!exists $got->{livePusher}, 'no pusher config: no livePusher');
+ok($got->{prefs}{liveActivity}, 'liveActivity defaults to on');
 put("$home/.claude/task-board-live.json", '{}');
 $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app"`;
-ok(!exists JSON::PP->new->utf8->decode($out)->{phone}, 'pusher config but no shared folder: no phone switch');
-$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "$sh" --device Mini`;
 $got = JSON::PP->new->utf8->decode($out);
-ok($got->{phone}{show}, 'no phone-live.conf yet = show');
-is($got->{phone}{path}, "$sh/phone-live.conf", 'phone switch path is in the shared folder');
-put("$sh/phone-live.conf", '{"show":false,"lockScreen":true,"at":1}');
-$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "$sh" --device Mini`;
-ok(!JSON::PP->new->utf8->decode($out)->{phone}{show}, 'show false in phone-live.conf = off');
-put("$sh/phone-live.conf", 'not json');
-$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "$sh" --device Mini`;
-ok(JSON::PP->new->utf8->decode($out)->{phone}{show}, 'unreadable phone-live.conf = show');
-is(scalar @{ JSON::PP->new->utf8->decode($out)->{remote} // [] }, 1, 'phone-live.conf is not read as a snapshot');
+ok($got->{livePusher}, 'pusher config: livePusher (no shared folder needed)');
+put("$home/.claude/task-board-prefs.json", '{"nextSteps":true,"liveActivity":false}');
+$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app"`;
+$got = JSON::PP->new->utf8->decode($out);
+ok(!$got->{prefs}{liveActivity}, 'liveActivity false in the prefs file = off');
+ok($got->{prefs}{nextSteps}, 'nextSteps is read alongside');
 
 sub slurp_t { my ($p) = @_; open(my $fh, '<:raw', $p) or return ''; local $/; my $t = <$fh>; close $fh; return $t }
 

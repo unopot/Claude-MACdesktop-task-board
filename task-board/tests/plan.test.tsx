@@ -627,10 +627,10 @@ test('Details 窗：别的电脑的会话有那台电脑的标签；有 Remote C
   await ui.unmount()
 })
 
-test('iPhone Live 开关：本机装了推送器（扫描进程给出 phone）才画；点一下写共享目录的 phone-live.conf，保留别的字段、at 换成现在', async ($, on) => {
+test('iPhone Live 开关：本机装了推送器（扫描进程给出 livePusher）才画；点一下写开关文件的 liveActivity，保留别的字段；横条上不写 On / Off', async ($, on) => {
   const at = Date.now()
-  const path = '/Users/u/Library/Mobile Documents/com~apple~CloudDocs/Claude Code/task-board-shared/phone-live.conf'
-  let board: Record<string, unknown> = { at, tick: 1, prefs: { nextSteps: false }, prefsPath: '/Users/u/.claude/task-board-prefs.json', sessions: [row('b', '本会话', 'running', 5)] }
+  const prefsPath = '/Users/u/.claude/task-board-prefs.json'
+  let board: Record<string, unknown> = { at, tick: 1, prefs: { nextSteps: false }, prefsPath, sessions: [row('b', '本会话', 'running', 5)] }
   on('state.get', async (_$, e, next) => {
     if (e.plugin === 'task-board' && e.key === 'board') return { value: { value: board, version: 1 } }
     if (e.plugin === 'task-board' && e.key === 'me') return { value: { value: 'b', version: 1 } }
@@ -638,7 +638,7 @@ test('iPhone Live 开关：本机装了推送器（扫描进程给出 phone）�
   })
   on('ui.log', async () => ({ value: undefined }))
   on('ui.toast', async () => ({ value: undefined }))
-  on('fs.read', async () => ({ value: '{"show":true,"lockScreen":true,"at":1}' }))
+  on('fs.read', async () => ({ value: '{"nextSteps":false,"hidden":{"e":1}}' }))
   const writes: { path: string; text: string }[] = []
   on('fs.write', async (_$, e) => {
     const w = e as { path?: unknown; text?: unknown }
@@ -646,34 +646,35 @@ test('iPhone Live 开关：本机装了推送器（扫描进程给出 phone）�
     return { value: undefined }
   })
 
-  // 没装推送器：桌面横条、手机、Details 窗都没有这个开关
+  // 没装推送器：横条上没有这个开关
   const off = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
   expect(await off.find({ key: 'next-switch' })).toBeDefined()
   expect(await off.find({ key: 'phone-switch' })).toBeUndefined()
   await off.unmount()
 
-  // 装了：桌面横条上和 Next step 并排，显示 On；点一下写 show:false
-  board = { ...board, phone: { show: true, path } }
+  // 装了：和 Next step 并排，只有名字和滑块；点一下（开着）写 liveActivity:false，别的字段留着
+  board = { ...board, livePusher: true }
   const ui = await $.ui.mount({ plugin: 'task-board', surface: 'desktop', ...BAND })
   expect(await ui.find({ key: 'phone-switch' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^iPhone Live$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^(On|Off)$/ })).toBeUndefined()
   await ui.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'phone-toggle' })
   expect(writes.length).toBe(1)
-  expect(writes[0]?.path).toBe(path)
-  const w = JSON.parse(writes[0]?.text ?? '{}') as { show?: boolean; lockScreen?: boolean; at?: number }
-  expect(w.show).toBe(false)
-  expect(w.lockScreen).toBe(true)
-  expect(w.at).toBeGreaterThan(at - 1)
+  expect(writes[0]?.path).toBe(prefsPath)
+  const w = JSON.parse(writes[0]?.text ?? '{}') as { liveActivity?: boolean; nextSteps?: boolean; hidden?: Record<string, number> }
+  expect(w.liveActivity).toBe(false)
+  expect(w.nextSteps).toBe(false)
+  expect(w.hidden).toEqual({ e: 1 })
   await ui.unmount()
 
   // 手机：按钮；关着时点一下 = 打开
-  board = { ...board, phone: { show: false, path } }
+  board = { ...board, prefs: { nextSteps: false, liveActivity: false } }
   const phone = await $.ui.mount({ plugin: 'task-board', surface: 'mobile', ...BAND, props: { ...BAND.props, bodyColumns: 44 } })
   await phone.press({ key: 'm-fold' })
   expect(await phone.find({ key: 'm-phone' })).toBeDefined()
   await phone.press({ key: 'm-phone' })
   expect(writes.length).toBe(2)
-  expect(JSON.parse(writes[1]?.text ?? '{}').show).toBe(true)
+  expect(JSON.parse(writes[1]?.text ?? '{}').liveActivity).toBe(true)
   await phone.unmount()
 
   // Details 窗（桌面）也有

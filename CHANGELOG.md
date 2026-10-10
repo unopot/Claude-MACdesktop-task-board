@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.1
+- The **iPhone Live** switch is this computer's own: it is saved as `liveActivity` in `~/.claude/task-board-prefs.json`, which the pusher already reads, instead of writing the iPhone app's `phone-live.conf`. The two switches stay separate — the cards are pushed only when both this switch and the one in the iPhone app are on. It shows whenever the pusher's config is there (no shared folder needed).
+- The two switches on the board are just a name and a slider now (no **On** / **Off** text), so the Done header has more room. The Details pane keeps the text.
+
 ## 2.4.0
 - **iPhone Live switch** next to **Next step** on the board (and in the Details pane and the phone layout), for people who run the TaskBoard iPhone Live Activity pusher. It only shows when this computer has the pusher's config (`~/.claude/task-board-live.json`) and a shared folder is set, so nobody else sees it. It writes `phone-live.conf` in the shared folder — the same file as the iPhone app's own switch — so whichever computer is pushing ends the lock screen and Dynamic Island cards, or brings them back.
 - The scanner (`scan.pl`) reads `phone-live.conf` in that case and passes it on as `phone` (`show`, `path`).

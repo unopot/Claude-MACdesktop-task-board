@@ -278,7 +278,7 @@ function boardFrom(got: ScanLine, b: Board): Board {
     usagePath: got.usagePath,
     usage: parseUsage(got.usageText),
     inputDir: got.inputDir,
-    phone: got.phone,
+    livePusher: got.livePusher,
   }
 }
 
@@ -485,37 +485,37 @@ async function toggleNext($: EngineInterface) {
 
 const toggleLabel = (b: Board) => (nextOn(b) ? 'Suggest next step: on' : 'Suggest next step: off')
 
-const phoneOn = (b: Board) => b.phone?.show !== false
+const phoneOn = (b: Board) => b.prefs?.liveActivity !== false
 
 /**
- * iPhone Live 开关：写共享目录里的 phone-live.conf（和手机设置页的「在手机上显示」是同一个文件），
- * 不管哪台电脑在推送，推送器读到 at 变了就照 show 结束两张卡或重开。只在本机装了推送器时画（扫描进程给出 phone）。
+ * 本机的 iPhone Live 开关：写同一个开关文件的 liveActivity，本机的推送器读它。
+ * 关 = 结束锁屏和灵动岛上的卡、不再开卡；开 = 重开。手机设置页有自己的开关，两个都开着才推（不互相同步）。
+ * 只在本机装了推送器时画（扫描进程给出 livePusher）。
  */
 async function togglePhone($: EngineInterface) {
   const b = await read($, board)
-  if (!b.phone) {
+  if (!b.prefsPath || !b.livePusher) {
     await $.ui.toast('Task board is still starting — try again in a few seconds')
     return
   }
   const on = !phoneOn(b)
   let old: Record<string, unknown> = {}
   try {
-    const p = JSON.parse(await $.fs.read(b.phone.path)) as unknown
-    if (p && typeof p === 'object') old = p as Record<string, unknown>
+    old = JSON.parse(await $.fs.read(b.prefsPath)) as Record<string, unknown>
   } catch {
-    // 还没有这个文件，或读不懂
+    // 还没有这个文件
   }
   try {
-    await $.fs.write(b.phone.path, `${JSON.stringify({ ...old, show: on, at: Date.now() })}\n`)
+    await $.fs.write(b.prefsPath, `${JSON.stringify({ ...old, liveActivity: on }, null, 2)}\n`)
   } catch (err) {
     await $.ui.toast(`Could not save the switch: ${String(err)}`)
     return
   }
-  await update($, board, x => (x.phone ? { ...x, phone: { ...x.phone, show: on } } : x))
+  await update($, board, x => ({ ...x, prefs: { ...x.prefs, nextSteps: x.prefs?.nextSteps !== false, liveActivity: on } }))
   await $.ui.toast(
     on
-      ? 'iPhone Live on — the lock screen cards come back within a minute'
-      : 'iPhone Live off — the lock screen and Dynamic Island cards end (whichever computer is pushing)',
+      ? 'iPhone Live on — the lock screen cards come back when this computer pushes (the iPhone app switch must be on too)'
+      : 'iPhone Live off — this computer stops pushing to the lock screen and Dynamic Island',
   )
 }
 
@@ -548,7 +548,7 @@ async function setHidden($: EngineInterface, id: string, hide: boolean) {
     await $.ui.toast(`Could not save: ${String(err)}`)
     return
   }
-  await update($, board, x => ({ ...x, prefs: { nextSteps: x.prefs?.nextSteps !== false, hidden } }))
+  await update($, board, x => ({ ...x, prefs: { ...x.prefs, nextSteps: x.prefs?.nextSteps !== false, hidden } }))
   if (hide && s) await $.ui.toast(`Hid "${s.title}" — it stays listed in Details`)
 }
 
@@ -1039,7 +1039,7 @@ export const register: Register = (on, options) => {
           <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={1} marginTop={1}>
             <Box flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={1} minWidth={0}>
               <Button key="m-next" plain dimColor={!isOn} label={`Next step: ${isOn ? 'On' : 'Off'}`} onPress={tap('toggle')} />
-              {b.phone && <Button key="m-phone" plain dimColor={!phoneOn(b)} label={`iPhone Live: ${phoneOn(b) ? 'On' : 'Off'}`} onPress={tap('phone')} />}
+              {b.livePusher && <Button key="m-phone" plain dimColor={!phoneOn(b)} label={`iPhone Live: ${phoneOn(b) ? 'On' : 'Off'}`} onPress={tap('phone')} />}
               <Button key="m-details" plain dimColor label={`Details${hiddenN > 0 ? ` · ${hiddenN} hidden` : ''}`} onPress={tap('details')} />
             </Box>
             <Box flexShrink={0}>
@@ -1069,7 +1069,7 @@ export const register: Register = (on, options) => {
             ))}
             <Button {...details} />
             <Button {...nextSwitch} dimColor />
-            {b.phone && <Button {...phoneSwitch} dimColor />}
+            {b.livePusher && <Button {...phoneSwitch} dimColor />}
           </Box>
           {steps}
         </Box>
@@ -1356,20 +1356,18 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // 扁平胶囊开关：文字 + On/Off + 小滑块，整块可点（透明点击层盖在上面）
+    // 扁平胶囊开关：文字 + 小滑块（滑块本身表示开 / 关，不再写 On / Off，横条上省地方），整块可点（透明点击层盖在上面）
     const toggle = (
       <Box key="next-switch" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1} paddingY={0.5} borderStyle="round" borderDimColor flexShrink={0}>
         <Text bold wrap="truncate-end">Next step</Text>
-        <Text color={isOn ? ACCENT : undefined} dimColor={!isOn}>{isOn ? "On" : "Off"}</Text>
         <Svg source={switchSvg(isOn)} alt={isOn ? 'Suggest next step is on' : 'Suggest next step is off'} width={30} height={18} />
         {hit('next-toggle', 'toggle')}
       </Box>
     )
     const isPhone = phoneOn(b)
-    const phoneToggle = b.phone && (
+    const phoneToggle = b.livePusher && (
       <Box key="phone-switch" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1} paddingY={0.5} borderStyle="round" borderDimColor flexShrink={0}>
         <Text bold wrap="truncate-end">iPhone Live</Text>
-        <Text color={isPhone ? ACCENT : undefined} dimColor={!isPhone}>{isPhone ? "On" : "Off"}</Text>
         <Svg source={switchSvg(isPhone)} alt={isPhone ? 'iPhone Live is on' : 'iPhone Live is off'} width={30} height={18} />
         {hit('phone-toggle', 'phone')}
       </Box>
@@ -1539,7 +1537,7 @@ export const register: Register = (on, options) => {
                 <Svg source={switchSvg(isOn)} alt={isOn ? 'Suggest next step is on' : 'Suggest next step is off'} width={30} height={18} />
                 {hit('pane-next-toggle', 'toggle')}
               </Box>
-              {b.phone && (
+              {b.livePusher && (
                 <Box key="pane-phone" position="relative" flexDirection="row" alignItems="center" gap={1} paddingX={1} borderStyle="round" borderDimColor>
                   <Text bold>iPhone Live</Text>
                   <Text color={phoneOn(b) ? ACCENT : undefined} dimColor={!phoneOn(b)}>{phoneOn(b) ? 'On' : 'Off'}</Text>
@@ -1633,7 +1631,7 @@ export const register: Register = (on, options) => {
             <Text bold>{summary}</Text>
             <Box flexDirection="row" gap={1}>
               <Button {...nextSwitch} />
-              {b.phone && <Button {...phoneSwitch} />}
+              {b.livePusher && <Button {...phoneSwitch} />}
               <Button {...toggle} />
             </Box>
           </Box>
@@ -1675,7 +1673,7 @@ export const register: Register = (on, options) => {
           <Text bold>{summary}</Text>
           <Button {...toggle} />
           <Button {...nextSwitch} />
-          {b.phone && <Button {...phoneSwitch} />}
+          {b.livePusher && <Button {...phoneSwitch} />}
         </Box>
         <Text dimColor>{scope}</Text>
         {notice !== '' && <Text dimColor>{notice}</Text>}
