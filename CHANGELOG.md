@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.4
+- Each session in the snapshot carries `msgAgeSec`: seconds since its last timestamped message (main transcript or subagents). The desktop app sometimes appends bookkeeping lines to an old session's transcript (Remote Control, cost), which makes the file look new; `ageSec` still follows the file, `msgAgeSec` does not. The iPhone pusher and app use it to decide what finished recently.
+- A session no longer shows as running just because its transcript file was touched: the 90-second "still running" rule also needs a recent message.
+
 ## 2.4.3
 - **Details** on the desktop board is a three-dot button (⋯) that never gets cut off; the hidden count moved out of it (the Details pane still lists hidden sessions).
 

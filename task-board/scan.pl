@@ -356,6 +356,8 @@ do {
     my $row = eval {
       my $st = get_st($path);
       my $mtime = $fileM;
+      # 最后一条带时间的消息（主会话和子代理里最新的）：App 往 transcript 末尾补写的后台信息没有时间，不算
+      my $msgT = $st->{lastTs};
       # 子代理 transcript：<session>/subagents/*.jsonl
       my %sub = (tin => 0, tcw => 0, tcr => 0, tout => 0, n => 0, active => 0);
       my @subRows;
@@ -372,6 +374,7 @@ do {
           my $isActive = (($now - $sm) < 60 && $ss->{stop} ne 'end_turn' && $ss->{tool} ne 'SubagentHandback') ? 1 : 0;
           $sub{active}++ if $isActive;
           $mtime = $sm if $sm > $mtime;
+          $msgT = $ss->{lastTs} if defined $ss->{lastTs} && (!defined $msgT || $ss->{lastTs} > $msgT);
           # 子代理明细行：正在跑的，和这一轮里跑完的（名字、类型来自旁边的 .meta.json）
           if ($isActive || (defined $st->{turnAt} && defined $ss->{lastTs} && $ss->{lastTs} >= $st->{turnAt})) {
             # .meta.json 可能比 transcript 晚一点写出来：没读到就下一轮再读
@@ -399,6 +402,7 @@ do {
       @subRows = sort { ($b->{active} <=> $a->{active}) || ($a->{at} <=> $b->{at}) } @subRows;
       splice(@subRows, 30) if @subRows > 30;
       my $age = $now - $mtime;
+      my $msgAge = defined $msgT ? $now - $msgT : $age;
       # 主会话的缓存只被主 transcript 里的请求续期（子代理用自己的缓存前缀）
       my $cacheAge = defined $st->{lastReq} ? int($now - $st->{lastReq}) : -1;
 
@@ -406,7 +410,7 @@ do {
       my $status;
       if ($sub{active} > 0) { $status = 'running' }
       elsif ($st->{kind} eq 'assistant' && $st->{stop} eq 'end_turn') { $status = 'done' }
-      elsif ($age < 90) { $status = 'running' }
+      elsif ($age < 90 && $msgAge < 90) { $status = 'running' }
       elsif ($st->{kind} eq 'assistant' && $st->{stop} eq 'tool_use') { $status = 'waiting' }
       else { $status = 'idle' }
       # 会话自己报的“在等我决定”（授权框、提问、MCP 表单）比上面的猜测准：标记之后 transcript 没有新内容就算数
@@ -490,7 +494,7 @@ do {
       my $project = $st->{cwd} ne '' ? basename($st->{cwd}) : '';
       return {
         id => $id, title => $title, link => $link, bridge => $bridge, project => $project, status => $status,
-        ageSec => int($age), cacheAgeSec => $cacheAge, done => $done, total => $total, current => $current,
+        ageSec => int($age), msgAgeSec => int($msgAge), cacheAgeSec => $cacheAge, done => $done, total => $total, current => $current,
         input => $st->{tin} + $sub{tin}, cacheWrite => $st->{tcw} + $sub{tcw}, cacheRead => $st->{tcr} + $sub{tcr}, output => $st->{tout} + $sub{tout},
         subagents => $sub{n}, subActive => $sub{active},
         model => $st->{model}, effort => $st->{effort},
