@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.4.5
+- **One scanner per computer does the work.** The desktop app keeps recently opened sessions alive in the background, and each one started its own `scan.pl`, so a dozen scanners read every transcript every 3 seconds. Now the first scanner takes a lock (`~/.claude/task-board-scan-<id>.lock`) and writes each line to `~/.claude/task-board-scan-<id>.json`; the others just pass that line on. When the leading session closes, another scanner takes over within a few seconds. Scanners with different settings (shared folder, device name) use different locks.
+- The snapshot in the shared folder is written in place instead of being swapped in with a rename, and only by the leading scanner. Many writers renaming the same file made iCloud keep conflict versions, and the other computer saw the snapshot as `Mac(1).json`.
+
 ## 2.4.4
 - Each session in the snapshot carries `msgAgeSec`: seconds since its last timestamped message (main transcript or subagents). The desktop app sometimes appends bookkeeping lines to an old session's transcript (Remote Control, cost), which makes the file look new; `ageSec` still follows the file, `msgAgeSec` does not. The iPhone pusher and app use it to decide what finished recently.
 - A session no longer shows as running just because its transcript file was touched: the 90-second "still running" rule also needs a recent message.

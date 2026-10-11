@@ -17,6 +17,7 @@ use Time::Local qw(timegm);
 use Time::HiRes qw(time sleep);
 use File::Basename qw(basename dirname);
 use File::Spec;
+use Fcntl qw(:flock);
 
 my ($once, $hours, $max, $intervalMs) = (0, 24, 12, 3000);
 my $home = $ENV{HOME} // (getpwuid($<))[7];
@@ -58,6 +59,17 @@ if ($shared ne '' && !-d $shared) {
   eval { File::Path::make_path($shared) };
   $shared = '' unless -d $shared;   # 建不出来（同步盘没装）就当没开
 }
+# 同一台电脑只让一个扫描进程真扫：App 让最近打开过的会话都在后台挂着，每个会话各起一个扫描进程，
+# 十几个一起扫既费 CPU，又一起写共享目录里的快照（iCloud 会记成冲突，对面电脑看到的就成了 Mac(1).json）。
+# 拿到锁的是主扫描，每轮把输出写进 $leadPath；其他的只转发这一份。主扫描所在的会话关了，锁随之释放，谁先拿到谁接手。
+# 参数不同（共享目录、本机标签、范围）的扫描输出不一样，各用各的锁。
+my $leadSig = unpack('%32C*', join("\0", $hours, $max, $shared, $device));
+my $lockPath = "$home/.claude/task-board-scan-$leadSig.lock";
+my $leadPath = "$home/.claude/task-board-scan-$leadSig.json";
+my $lockFh;
+my $isLead = $once;   # --once（测试）不排队
+my $LEAD_MAX_SEC = 10;   # 主扫描的输出超过这么久没更新就不转发（它正在交接或卡住了）
+
 # 共享目录里的快照超过这么久没更新 = 那台电脑离线，不显示（和插件里的 SNAP_MAX_SEC 一致）
 my $SHARED_MAX_MS = 10 * 60 * 1000;
 
@@ -311,6 +323,15 @@ sub mtime_of { my ($p) = @_; my @s = stat($p); return @s ? $s[9] : 0 }
 sub num { my ($v) = @_; return defined $v ? 0 + $v : undef }
 sub str { my ($v) = @_; return defined $v ? '' . $v : '' }
 
+# 共享目录（同步盘）里原地写，不换名：换名在 iCloud 看来是删掉旧文件再建一个新的，对面容易生出冲突副本。
+# 读的一方偶尔读到半个文件，会因为不是完整的 JSON 跳过这一轮。
+sub write_in_place {
+  my ($text, $dest) = @_;
+  open(my $fh, '>:raw', $dest) or return;
+  print $fh $text;
+  close $fh;
+}
+
 # 先写临时文件再整个换上（rename 是原子的），读的一方不会读到半个文件；几个会话同时写，谁后换上算谁的
 sub swap_in {
   my ($text, $dest) = @_;
@@ -321,7 +342,8 @@ sub swap_in {
   rename($tmp, $dest) or unlink $tmp;
 }
 
-do {
+# 主扫描的一轮：扫所有 transcript，输出一行
+sub scan_round {
   my $now = time();
   my $cut = $now - $hours * 3600;
   my $desk = get_desktop_map();
@@ -529,7 +551,7 @@ do {
   my $writeSnap = $now - $lastSnap >= 10;
   # 跨设备共享：本机快照（不含 remote，不然两边会互相套进去越滚越大）写到共享目录；再读其他电脑的快照
   if ($shared ne '') {
-    swap_in($line, "$shared/$device.json") if $writeSnap;
+    write_in_place($line, "$shared/$device.json") if $writeSnap;
     my @remote;
     if (opendir(my $dh, $shared)) {
       for my $name (sort readdir($dh)) {
@@ -553,10 +575,37 @@ do {
   print STDOUT "$line\n";
   STDOUT->flush();
   swap_in($line, $latest) if $latest ne '';
+  swap_in($line, $leadPath) unless $once;
   # 本机的共用快照最多 10 秒写一次（带 remote：新会话一启动就能看到别的电脑）
   if ($writeSnap) {
     $lastSnap = $now;
     swap_in($line, $snapPath);
   }
+}
+
+# 还没拿到锁就试一次（不等）：拿到了从此就是主扫描，锁跟着进程，进程退出系统自动放锁
+sub try_lead {
+  return 1 if $isLead;
+  open($lockFh, '>>', $lockPath) or return 0;
+  if (flock($lockFh, LOCK_EX | LOCK_NB)) { $isLead = 1; return 1 }
+  close $lockFh;
+  $lockFh = undef;
+  return 0;
+}
+
+# 跟随的一轮：原样转发主扫描最近的一行（太旧就这轮不出，等下一轮或自己接手）
+sub follow_round {
+  my @s = stat($leadPath);
+  return unless @s && time() - $s[9] < $LEAD_MAX_SEC;
+  my $line = slurp($leadPath) // return;
+  $line =~ s/\s+$//;
+  return unless $line =~ /^\{.*\}$/s;
+  print STDOUT "$line\n";
+  STDOUT->flush();
+  swap_in($line, $latest) if $latest ne '';
+}
+
+do {
+  if (try_lead()) { scan_round() } else { follow_round() }
   sleep($intervalMs / 1000) unless $once;
 } while (!$once);
