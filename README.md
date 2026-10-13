@@ -39,7 +39,7 @@ The board lives above the prompt of a session, so you only see it while a sessio
 - A coloured count in the macOS menu bar: **yellow** = needs input, **blue** = running or waiting, **green** = done (the same sessions the board lists: finished within the last hour with the cache still warm, hidden ones left out). A grey dot when there is nothing.
 - Click it for the list: one row per session with a coloured dot, title, state, project and time; sessions from another computer carry its label. Click a row to switch to that session (one from another computer opens through Remote Control, as on the board).
 - It starts by itself when a session opens and keeps running after the session closes; only one runs at a time. It has no Quit item: switch **Menu bar counter** off in the settings to stop it.
-- It is a plain script run by the system's own `osascript` (`menubar.js`), with its own copy of the scanner, so nothing to build or install.
+- It is a plain script run by the system's own `osascript` (`menubar.js`), reading the same scanner as the sessions, so nothing to build or install.
 
 If you cannot see it: on a MacBook with a notch, a crowded menu bar hides the leftmost icons behind the notch (look on an external display, or ⌘-drag other icons out); and in **System Settings › Menu Bar**, allow **osascript** in the menu bar.
 
@@ -82,7 +82,7 @@ Do this on **every** computer that should take part.
 - Two computers with the same label show up as one. Change one label.
 - The drive must actually download the files (no "online-only" placeholders).
 - Clicking a card from another computer opens a session that does not connect: Remote Control is off for that session on its own computer, or the session was closed there. Turn on **Connect new sessions to Remote Control** in that computer's desktop app settings; it applies to sessions started after that.
-- Sync-conflict copies such as `Office 2.json` or `Office (1).json` are harmless: the newest copy of a session wins and the rest is ignored. Delete them when they pile up (the Windows version deletes the copies made of its own file by itself).
+- Sync-conflict copies such as `Office 2.json` or `Office (1).json` are harmless: the newest copy of a session wins and the rest is ignored. Each computer deletes the copies of its own file once they have not been updated for 30 seconds.
 - To turn sharing off on a computer, clear its Shared folder setting.
 
 ### What is shared
@@ -157,7 +157,7 @@ Run `/plugin configure task-board@unopot-mac-mods` in Claude Code:
 - Each session starts one small Perl process (`scan.pl`) that reads the transcripts under `~/.claude/projects` incrementally every 3 seconds, plus the desktop app's session list under `~/Library/Application Support/Claude/claude-code-sessions` for titles, links and Remote Control ids. Nothing leaves your machine; the plugin makes no network requests of its own.
 - A session marks itself as *needs input* when it raises a permission dialog, `AskUserQuestion` or an MCP form, and clears the mark when the call finishes or the turn ends.
 - It writes four small things under `~/.claude`: `task-board-prefs.json` (switch and hidden sessions), `task-board-usage.json` (latest usage reading, shared between sessions), `task-board-snapshot.json` (the latest scan, so a new session shows the board at once) and the folder `task-board-input/` (the needs-input marks). With sharing on it also writes `<label>.json` into the shared folder. Delete them after uninstalling if you like.
-- The menu bar counter is started by `menubar.pl` (detached from the session, one at a time, pid in `~/.claude/task-board-menubar.pid`). It runs its own `scan.pl` with `--latest ~/.claude/task-board-menubar.json` and reads that file every 2 seconds. When its plugin version is removed (after an update) it quits, and the next session starts the new one.
+- The menu bar counter is started by `menubar.pl` (detached from the session, one at a time, pid in `~/.claude/task-board-menubar.pid`). When no scanner is leading it starts `scan.pl` with `--latest ~/.claude/task-board-menubar.json` and reads that file every 2 seconds; otherwise it reads the leader's output file. When its plugin version is removed (after an update) it quits, and the next session starts the new one.
 - Clicking a card runs `open claude://…`, which brings the desktop app to that session: `claude://claude.ai/epitaxy/local_…` for a session on this computer, `claude://claude.ai/code/session_…` (Remote Control) for one on another computer.
 
 ## Known limitations

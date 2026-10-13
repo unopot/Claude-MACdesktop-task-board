@@ -4,7 +4,8 @@
 //   osascript -l JavaScript menubar.js <scan.pl 路径> <缓存分钟数> <共享目录或空> <本机标签>
 //
 // 平时由插件（hooks/register.tsx 经 menubar.pl）拉起，同一时间只留一个。数据和任务板同源：
-// 自己跑一份 scan.pl（--latest 每 3 秒写一次文件），读这个文件；筛选、排序照 register.tsx 的 isActive / isHidden。
+// 本机没有主扫描时自己跑一份 scan.pl（--latest 每 3 秒写一次文件），读这个文件；已经有主扫描（scan.pl 写进来的是 {"follow": 文件}）
+// 就不挂扫描进程，直接读主扫描的输出文件，10 秒没更新再重起 scan.pl。筛选、排序照 register.tsx 的 isActive / isHidden。
 ObjC.import('Cocoa')
 
 const ACTIVE_SEC = 60 * 60 // 多久没动静就不再列出（在跑 / 在等的始终列出）
@@ -96,10 +97,11 @@ function run(argv) {
   let scanStartedAt = 0
   function ensureScanner() {
     if (scanner && scanner.isRunning) return
+    if (followPath !== null) return
     const now = Date.now()
     if (now - scanStartedAt < 10000) return // 刚起过又退了：隔 10 秒再试
     scanStartedAt = now
-    const args = ['-e', GUARD, scanPl, '--hours', '24', '--max', '12', '--latest', latestPath]
+    const args = ['-e', GUARD, scanPl, '--hours', '24', '--max', '12', '--latest', latestPath, '--lead-only']
     if (shared !== '') args.push('--shared', shared, '--device', device)
     const t = $.NSTask.alloc.init
     t.launchPath = '/usr/bin/perl'
@@ -123,17 +125,35 @@ function run(argv) {
   // ── 数据 ───────────────────────────────────────────────
   let got = null
   let rows = []
+  // 本机已经有主扫描：读它的输出文件（scan.pl --lead-only 拿不到锁时把 {"follow": 文件} 写进 latestPath 后退出）
+  let followPath = null
+  const FOLLOW_STALE_MS = 10000
   function load() {
-    const text = readText(latestPath)
-    if (text === null) return
+    const text = readText(followPath ?? latestPath)
+    if (text === null) {
+      if (followPath !== null) stopFollowing()
+      return
+    }
     try {
       const g = JSON.parse(text)
+      if (followPath === null && typeof g.follow === 'string') {
+        followPath = g.follow
+        return load()
+      }
       if (typeof g.at !== 'number') return
+      // 主扫描 10 秒没更新（它所在的会话关了）：不跟了，马上重起 scan.pl，谁先拿到锁谁当新的主扫描
+      if (followPath !== null && Date.now() - g.at > FOLLOW_STALE_MS) return stopFollowing()
       got = g
       rows = visible(g, ttlSec)
     } catch (err) {
       // 正好在换文件：下一轮再读
     }
+  }
+
+  function stopFollowing() {
+    followPath = null
+    scanStartedAt = 0
+    fm.removeItemAtPathError(latestPath, null) // 里面还是 follow 那一行，别再读到
   }
 
   // ── 菜单栏上的计数 ─────────────────────────────────────
@@ -246,8 +266,8 @@ function run(argv) {
     if (scanPl === '' || !fm.fileExistsAtPath(scanPl)) return quit()
     const owner = readText(pidPath)
     if (owner !== null && owner.trim() !== String(myPid)) return quit()
-    ensureScanner()
     load()
+    ensureScanner()
     paintBar()
   }
 

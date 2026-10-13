@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.6
+Same as the Windows version's 2.4.2 / 2.4.3.
+- **Only one scanner process per computer.** Sessions, the menu bar counter and the iPhone pusher start `scan.pl --lead-only`: when another scanner already leads, it prints one line `{"follow":"<file>"}` and exits, and the caller reads the leader's output file (`~/.claude/task-board-scan-<id>.json`) every few seconds instead of keeping a Perl process alive just to pass lines on. When that file stops updating for 10 seconds (the leading session closed), the caller starts the scanner again and the first one to get the lock leads.
+- **Your own conflict copies are cleaned up once they are stale.** Copies such as `Mac 2.json`, `Mac(1).json` or a leftover `Mac.json.*.tmp` in the shared folder are deleted after 30 seconds without updates. Fresh ones are kept: iCloud sometimes renames the just-written snapshot itself, and readers already keep the newest snapshot per device.
+- **A snapshot iCloud has not downloaded yet no longer stalls the scanner.** Another computer's new conflict-named snapshot can sit in the shared folder as a placeholder; reading it waited for a download that never came, and the board stopped updating. Such files are now skipped and iCloud is asked to download them (`brctl download`), so they are read on a later round; a read that still hangs is given up after 2 seconds.
+
 ## 2.4.5
 - **One scanner per computer does the work.** The desktop app keeps recently opened sessions alive in the background, and each one started its own `scan.pl`, so a dozen scanners read every transcript every 3 seconds. Now the first scanner takes a lock (`~/.claude/task-board-scan-<id>.lock`) and writes each line to `~/.claude/task-board-scan-<id>.json`; the others just pass that line on. When the leading session closes, another scanner takes over within a few seconds. Scanners with different settings (shared folder, device name) use different locks.
 - The snapshot in the shared folder is written in place instead of being swapped in with a rename, and only by the leading scanner. Many writers renaming the same file made iCloud keep conflict versions, and the other computer saw the snapshot as `Mac(1).json`.

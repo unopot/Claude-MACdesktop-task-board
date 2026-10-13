@@ -7,6 +7,8 @@
 #   --shared DIR  跨设备共享目录（同步盘里）：每 10 秒把本机快照写成 DIR/<device>.json，每轮读目录里其他电脑的快照附在 remote 里
 #   --device NAME 本机标签（卡片上的灰色小标签，也是共享目录里的文件名；空 = Mac）
 #   --latest FILE 每一轮把输出的那一行（含 remote）原子地写进 FILE：菜单栏（menubar.js）读它，不用等 10 秒一次的共用快照
+#   --lead-only   只当主扫描：本机已经有主扫描在跑就输出一行 {"follow":"<主扫描的输出文件>"}（有 --latest 也写进 FILE）后退出，
+#                 调用方自己去读那个文件，不再挂一个进程转发
 #   --home / --app 只在测试时用：换掉 ~ 和桌面应用的会话目录。
 use strict;
 use warnings;
@@ -18,14 +20,17 @@ use Time::HiRes qw(time sleep);
 use File::Basename qw(basename dirname);
 use File::Spec;
 use Fcntl qw(:flock);
+use POSIX ();
 
 my ($once, $hours, $max, $intervalMs) = (0, 24, 12, 3000);
+my $leadOnly = 0;
 my $home = $ENV{HOME} // (getpwuid($<))[7];
 my $appRoot;
 my ($shared, $device, $latest) = ('', '', '');
 while (@ARGV) {
   my $a = shift @ARGV;
   if ($a eq '--once') { $once = 1 }
+  elsif ($a eq '--lead-only') { $leadOnly = 1 }
   elsif ($a eq '--hours') { $hours = 0 + shift @ARGV }
   elsif ($a eq '--max') { $max = 0 + shift @ARGV }
   elsif ($a eq '--interval-ms') { $intervalMs = 0 + shift @ARGV }
@@ -555,8 +560,36 @@ sub scan_round {
     my @remote;
     if (opendir(my $dh, $shared)) {
       for my $name (sort readdir($dh)) {
+        # 同步盘给本机文件生成的冲突副本（Mac 2.json、Mac(1).json）和残留的临时文件：是本机自己的东西，删掉。
+        # 但 iCloud 有时把刚原地写好的 Mac.json 直接改名成冲突名：那份就是最新的快照，马上删的话别的电脑上这台的会话时有时无。
+        # 所以只删 30 秒没更新的；读的一方按 device 留最新的
+        if ($name =~ /^\Q$device\E( \d+|\(\d+\))\.json$/ || $name =~ /^\Q$device\E\.json\..*\.tmp$/) {
+          my @st = stat("$shared/$name");
+          unlink "$shared/$name" if @st && $now - $st[9] >= 30;
+          next;
+        }
         next unless $name =~ /\.json$/ && $name ne "$device.json";
-        my $text = slurp("$shared/$name") // next;
+        # iCloud 还没下载下来的文件（有大小、没占磁盘块）：读它会一直等下载，整个扫描卡住（2026-10-13 卡过一个多小时）。
+        # 先跳过，叫 iCloud 去下载（它自己不会下：别的电脑新生成的冲突名文件一直停在没下载的状态），下载好了下一轮再读；
+        # 万一读起来还是卡，2 秒后放弃这一份
+        my @st = stat("$shared/$name");
+        next unless @st;
+        if ($st[7] > 0 && $st[12] == 0) {
+          request_download("$shared/$name");
+          next;
+        }
+        # 菜单栏起的扫描自带一个每 5 秒查父进程的闹钟（menubar.js 的 GUARD）：借用完把它的剩余时间还回去
+        my $guardLeft = alarm 0;
+        my $text = eval {
+          local $SIG{ALRM} = sub { die "timeout\n" };
+          alarm 2;
+          my $t = slurp("$shared/$name");
+          alarm 0;
+          $t;
+        };
+        alarm 0;
+        alarm($guardLeft > 0 ? $guardLeft : 1) if ref $SIG{ALRM} eq 'CODE';
+        next unless defined $text;
         $text =~ s/^\s+|\s+$//g;
         next unless $text =~ /^\{.*\}$/s;
         my $head = eval { $jsonIn->decode($text) } or next;
@@ -583,6 +616,22 @@ sub scan_round {
   }
 }
 
+# 叫 iCloud 下载共享目录里还没下载的文件：后台跑 brctl，不等它；同一个文件 10 秒内只叫一次
+my %downloadAsked;
+sub request_download {
+  my ($path) = @_;
+  1 while waitpid(-1, POSIX::WNOHANG()) > 0;   # 收掉上次的 brctl
+  return if time() - ($downloadAsked{$path} // 0) < 10;
+  $downloadAsked{$path} = time();
+  return unless -x '/usr/bin/brctl';
+  my $pid = fork() // return;
+  return if $pid;
+  open(STDIN, '<', '/dev/null');
+  open(STDOUT, '>', '/dev/null');
+  open(STDERR, '>', '/dev/null');
+  exec('/usr/bin/brctl', 'download', $path) or POSIX::_exit(0);
+}
+
 # 还没拿到锁就试一次（不等）：拿到了从此就是主扫描，锁跟着进程，进程退出系统自动放锁
 sub try_lead {
   return 1 if $isLead;
@@ -606,6 +655,14 @@ sub follow_round {
 }
 
 do {
+  # --lead-only 拿不到锁：告诉调用方去读主扫描的输出文件，自己退出（--once 不排队，到不了这里）
+  if ($leadOnly && !try_lead()) {
+    my $line = $json->encode({ follow => $leadPath });
+    print STDOUT "$line\n";
+    STDOUT->flush();
+    swap_in($line, $latest) if $latest ne '';
+    exit 0;
+  }
   if (try_lead()) { scan_round() } else { follow_round() }
   sleep($intervalMs / 1000) unless $once;
 } while (!$once);
