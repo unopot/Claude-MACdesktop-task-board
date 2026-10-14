@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.5.1
+- The usage ring in the Running header no longer reads `· in 2h 27m`: with the new Context ring the Mac window has no room for it.
+
 ## 2.5.0
 Same as the Windows version's 2.5.0.
 - **Context ring.** The Running header now has a second ring between the title and the usage ring: how full this session's context window is (the figure the desktop app no longer shows by the prompt box), coloured from 80%.

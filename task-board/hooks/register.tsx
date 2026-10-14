@@ -1425,7 +1425,8 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    // 账号 5 小时额度（设置页 Usage 里的 Current session）：小圆环 + 百分比 + 离重置多久，靠 Running 标题行右侧
+    // 账号 5 小时额度（设置页 Usage 里的 Current session）：小圆环 + 百分比，靠 Running 标题行右侧。
+    // Mac 的窗口窄，加了 Context 圆环后放不下离重置多久（Windows 版写 · in 2h 27m），重置时间在圆环的提示文字里
     const u = freshest(await read($, usage), b.usage)
     const five = limitNow(u, 'five_hour', b.at)
     const week = limitNow(u, 'seven_day', b.at)
@@ -1433,14 +1434,13 @@ export const register: Register = (on, options) => {
       <Box key="usage-ring" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
         <Svg
           source={ringSvg(five.pct)}
-          alt={`Current session usage ${Math.round(five.pct)}%${week ? `, weekly ${Math.round(week.pct)}%` : ''}`}
+          alt={`Current session usage ${Math.round(five.pct)}%${five.left > 0 ? `, resets in ${resetIn(five.left)}` : ''}${week ? `, weekly ${Math.round(week.pct)}%` : ''}`}
           width={16}
           height={16}
         />
         <Text>
           <Text dimColor>5h Usage </Text>
           <Text bold color={five.pct >= 80 ? ringHex(five.pct) : undefined}>{Math.round(five.pct)}%</Text>
-          {five.left > 0 && <Text dimColor> · in {resetIn(five.left)}</Text>}
         </Text>
       </Box>
     )
