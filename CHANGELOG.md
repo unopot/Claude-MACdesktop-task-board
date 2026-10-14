@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.0
+Same as the Windows version's 2.5.0.
+- **Context ring.** The Running header now has a second ring between the title and the usage ring: how full this session's context window is (the figure the desktop app no longer shows by the prompt box), coloured from 80%.
+- The usage ring is labelled **5h Usage** and reads `· in 2h 27m` instead of `· resets in 2h 27m`.
+
 ## 2.4.6
 Same as the Windows version's 2.4.2 / 2.4.3.
 - **Only one scanner process per computer.** Sessions, the menu bar counter and the iPhone pusher start `scan.pl --lead-only`: when another scanner already leads, it prints one line `{"follow":"<file>"}` and exits, and the caller reads the leader's output file (`~/.claude/task-board-scan-<id>.json`) every few seconds instead of keeping a Perl process alive just to pass lines on. When that file stops updating for 10 seconds (the leading session closed), the caller starts the scanner again and the first one to get the lock leads.
