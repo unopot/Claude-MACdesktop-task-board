@@ -16,8 +16,8 @@ Expand a running card to see its task list by stage, how long each step took, wh
 
 | Color | Status | Meaning |
 | --- | --- | --- |
-| blue | `43%` / `running` | working; the percentage is the task list's progress |
-| yellow | `needs input` | waiting for you: a permission dialog, a question, or an MCP form |
+| blue | `43%` / `running` | working, or the turn ended with background work (a background command, subagent or workflow) still running; the percentage is the task list's progress |
+| yellow | `needs input` | waiting for you: a permission dialog, a question, a plan to approve, an MCP form, a "New session / Do it here" card, or a turn that ended with a question in the next-step box |
 | light blue | `waiting` | stopped on a long tool call that does not need you |
 
 Each card also shows the elapsed time, how many subagents are running and the tokens used. The ring at the top right (*5h Usage*) is your account's five-hour usage limit (the *Current session* figure on the Usage page). The *Context* ring next to it shows how full this session's context window is.
@@ -155,7 +155,7 @@ Run `/plugin configure task-board@unopot-mac-mods` in Claude Code:
 ## How it works and what it touches
 
 - Each session starts one small Perl process (`scan.pl`) that reads the transcripts under `~/.claude/projects` incrementally every 3 seconds, plus the desktop app's session list under `~/Library/Application Support/Claude/claude-code-sessions` for titles, links and Remote Control ids. Nothing leaves your machine; the plugin makes no network requests of its own.
-- A session marks itself as *needs input* when it raises a permission dialog, `AskUserQuestion` or an MCP form, and clears the mark when the call finishes or the turn ends.
+- A session marks itself as *needs input* when it raises a permission dialog, `AskUserQuestion` or an MCP form, and clears the mark when the call finishes or the turn ends. The scanner also reads it from the transcript: an unanswered `AskUserQuestion`, `ExitPlanMode` or session offer card, or a turn whose closing next-step box asks you something (cleared when you reply). A background command, subagent or workflow counts as running until its completion notice arrives (at most 6 hours). The task list comes from TaskCreate / TaskUpdate, TodoWrite, or the desktop app's own task list.
 - It writes four small things under `~/.claude`: `task-board-prefs.json` (switch and hidden sessions), `task-board-usage.json` (latest usage reading, shared between sessions), `task-board-snapshot.json` (the latest scan, so a new session shows the board at once) and the folder `task-board-input/` (the needs-input marks). With sharing on it also writes `<label>.json` into the shared folder. Delete them after uninstalling if you like.
 - The menu bar counter is started by `menubar.pl` (detached from the session, one at a time, pid in `~/.claude/task-board-menubar.pid`). When no scanner is leading it starts `scan.pl` with `--latest ~/.claude/task-board-menubar.json` and reads that file every 2 seconds; otherwise it reads the leader's output file. When its plugin version is removed (after an update) it quits, and the next session starts the new one.
 - Clicking a card runs `open claude://…`, which brings the desktop app to that session: `claude://claude.ai/epitaxy/local_…` for a session on this computer, `claude://claude.ai/code/session_…` (Remote Control) for one on another computer.

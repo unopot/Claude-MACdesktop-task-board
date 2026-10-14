@@ -95,6 +95,14 @@ my $rxTaskUpd = qr/"name":"TaskUpdate","input":\{[^}]*?"taskId":"(\d+)"[^}]*?"st
 my $rxModel = qr/"model":"(claude-[^"]+)"/;
 my $rxTool = qr/"type":"tool_use","id":"[^"]*","name":"([^"]+)"/;
 my $rxEffort = qr/"effort":"([a-z]+)"/;
+# 派到后台的活（后台命令、后台子代理、Workflow）：工具结果里的编号；完成通知里带同一个编号和结束状态。Monitor 只是盯着，不算
+my $rxBgCmd = qr/"backgroundTaskId":"([A-Za-z0-9_-]+)"/;
+my $rxBgAsync = qr/"(?:agentId|taskId)":"([A-Za-z0-9_-]+)"/;
+my $rxBgDone = qr{<task-id>([A-Za-z0-9_-]+)</task-id>(?:(?!</task-notification>).)*?<status>(?:completed|failed|killed|stopped)</status>};
+# 要我答了才继续的工具：提问、计划审批、“开新会话 / 在这里做”卡片（start_session 的 offer）
+my $rxWaitTool = qr/"type":"tool_use","id":"([^"]+)","name":"(AskUserQuestion|ExitPlanMode|mcp__ccd_session__start_session)"/;
+# 后台的活和“在等我”的工具超过这么久还没结果就不算了（会话被关掉、App 重启时不会有完成通知）
+my $PENDING_MAX_SEC = 6 * 3600;
 
 # JSON 字符串里的转义（\n、\"、\uXXXX）还原成文字；坏的原样返回
 sub unesc {
@@ -129,6 +137,9 @@ sub new_file_state {
     # 步骤计时：任务 / todo 变成 in_progress 和 completed 的时间；todoT 按 todo 内容记
     todoT => {}, lastDone => undef,
     turnAt => undef,     # 这一轮用户提问的时间（没有任务清单时的总耗时从这里算）
+    bg => {},            # 还在后台跑的活：编号 -> 派出去的时间（UTC 秒）
+    askAt => undef,      # 这一轮结尾的“下一步”框在问我（wrap_up 带 ask）的时间
+    waitId => '', waitAt => undef,   # 还没答的提问 / 计划审批 / 开新会话卡片：工具调用 id 和时间
     model => '', tool => '', firstTs => undef, lastTs => undef, effort => '', calls => 0,   # 子代理行用
   };
 }
@@ -144,6 +155,40 @@ sub mark_step {
     }
     $t->{e} = $ts; $st->{lastDone} = $ts;
   }
+}
+
+# 桌面版自己的任务清单（mcp__ccd_turn__update_plan）放进同一份 tasks：
+#   items = 整份清单（同名的步骤留着原来的计时）；advance = 当前这步做完、下一个没开始的开始；done / start = 按 1 起的序号
+sub apply_plan {
+  my ($st, $in, $ts) = @_;
+  return unless ref $in eq 'HASH';
+  my $set = sub { my ($t, $s) = @_; $t->{s} = $s; mark_step($st, $t, $s, $ts) };
+  if (ref $in->{items} eq 'ARRAY' && @{ $in->{items} }) {
+    my %prev = map { ($st->{tasks}{$_}{t} => $st->{tasks}{$_}) } grep { $st->{tasks}{$_} } @{ $st->{taskOrder} };
+    $st->{tasks} = {}; $st->{taskOrder} = [];
+    my $n = 0;
+    for my $it (@{ $in->{items} }) {
+      next unless ref $it eq 'HASH';
+      $n++;
+      my $title = '' . ($it->{content} // '');
+      my $t = $prev{$title} // { s => 'pending', t => $title, c => $ts, a => undef, e => undef };
+      $set->($t, '' . ($it->{status} // 'pending'));
+      $st->{tasks}{$n} = $t; push @{ $st->{taskOrder} }, "$n";
+    }
+    $st->{taskN} = $n;
+    return;
+  }
+  my @list = map { $st->{tasks}{$_} } grep { $st->{tasks}{$_} } @{ $st->{taskOrder} };
+  if ($in->{advance}) {
+    my $cur = -1;
+    for my $i (0 .. $#list) { if ($list[$i]{s} eq 'in_progress') { $cur = $i; last } }
+    $set->($list[$cur], 'completed') if $cur >= 0;
+    for my $i ($cur + 1 .. $#list) { if ($list[$i]{s} eq 'pending') { $set->($list[$i], 'in_progress'); last } }
+  }
+  if (ref $in->{done} eq 'ARRAY') {
+    for my $d (@{ $in->{done} }) { my $i = int($d // 0) - 1; $set->($list[$i], 'completed') if $i >= 0 && $i <= $#list }
+  }
+  if ($in->{start}) { my $i = int($in->{start}) - 1; $set->($list[$i], 'in_progress') if $i >= 0 && $i <= $#list }
 }
 
 sub read_new {
@@ -177,13 +222,33 @@ sub read_new {
       $st->{turnAt} = $lts;
       # 新一轮已经开始：上一轮的 end_turn 不再代表“做完了”
       $st->{kind} = 'user'; $st->{stop} = '';
+      $st->{askAt} = undef; $st->{waitId} = '';   # 我发了话 = 上一轮问我的已经答了
     }
+    # 派到后台：Bash 的 backgroundTaskId，子代理 / Workflow 的 async_launched（只看 toolUseResult 里没转义的字段）
+    my $tr = index($line, '"toolUseResult":{');
+    if ($tr >= 0) {
+      my $rest = substr($line, $tr);
+      my $bid;
+      if ($rest =~ $rxBgCmd) { $bid = $1 }
+      elsif (index($rest, '"status":"async_launched"') >= 0 && $rest =~ $rxBgAsync) { $bid = $1 }
+      $st->{bg}{$bid} = defined $lts ? $lts : time if defined $bid;
+    }
+    if (%{ $st->{bg} } && index($line, '<task-id>') >= 0) {
+      delete $st->{bg}{$1} while $line =~ /$rxBgDone/g;
+    }
+    $st->{waitId} = '' if $st->{waitId} ne '' && index($line, "\"tool_use_id\":\"$st->{waitId}\"") >= 0;
     if ($line =~ $rxKind) {
       $st->{kind} = $1;
       if ($st->{kind} eq 'assistant') {
         if ($line =~ $rxModel) { $st->{model} = $1 }
         my @tools = ($line =~ /$rxTool/g);
         if (@tools) { $st->{tool} = $tools[-1]; $st->{calls} += scalar @tools }
+        # 这一轮的“下一步”框：带 ask 就是在问我（按钮答完会作为我发的话进来）
+        my $wu = index($line, '"name":"mcp__ccd_turn__wrap_up","input":{');
+        if ($wu >= 0) { $st->{askAt} = index($line, '"ask":"', $wu) >= 0 ? $lts : undef }
+        if ($line =~ $rxWaitTool && ($2 ne 'mcp__ccd_session__start_session' || index($line, '"initiation":"offer"') >= 0)) {
+          $st->{waitId} = $1; $st->{waitAt} = $lts;
+        }
         if ($line =~ $rxEffort) { $st->{effort} = $1 }
         $st->{stop} = ($line =~ $rxStop) ? $1 : '';
         if (index($line, '"usage"') >= 0 && $line =~ $rxUsage) {
@@ -226,6 +291,22 @@ sub read_new {
             my $subject = (ref $c->{input} eq 'HASH') ? ('' . ($c->{input}{subject} // '')) : '';
             $st->{tasks}{ $st->{taskN} } = { s => 'pending', t => $subject, c => $lts, a => undef, e => undef };
             push @{ $st->{taskOrder} }, '' . $st->{taskN};
+          }
+        }
+        # 桌面版的任务清单；wrap_up 收尾时把正在做的那步勾掉
+        if (index($line, '"name":"mcp__ccd_turn__update_plan"') >= 0 || index($line, '"name":"mcp__ccd_turn__wrap_up"') >= 0) {
+          my $o = eval { $jsonIn->decode($line) };
+          my $content = ($o && ref $o->{message} eq 'HASH' && ref $o->{message}{content} eq 'ARRAY') ? $o->{message}{content} : [];
+          for my $c (@$content) {
+            next unless ref $c eq 'HASH';
+            my $nm = $c->{name} // '';
+            if ($nm eq 'mcp__ccd_turn__update_plan') { apply_plan($st, $c->{input}, $lts) }
+            elsif ($nm eq 'mcp__ccd_turn__wrap_up') {
+              for my $k (@{ $st->{taskOrder} }) {
+                my $t = $st->{tasks}{$k} or next;
+                if ($t->{s} eq 'in_progress') { $t->{s} = 'completed'; mark_step($st, $t, 'completed', $lts) }
+              }
+            }
           }
         }
         while ($line =~ /$rxTaskUpd/g) {
@@ -440,6 +521,14 @@ sub scan_round {
       elsif ($age < 90 && $msgAge < 90) { $status = 'running' }
       elsif ($st->{kind} eq 'assistant' && $st->{stop} eq 'tool_use') { $status = 'waiting' }
       else { $status = 'idle' }
+      # 派到后台的活还没收到完成通知：这一轮虽然结束了（end_turn），活还在跑，跑完会叫醒会话接着做
+      my $old = $now - $PENDING_MAX_SEC;
+      for my $bk (keys %{ $st->{bg} }) { delete $st->{bg}{$bk} if $st->{bg}{$bk} < $old }
+      $status = 'running' if ($status eq 'done' || $status eq 'idle') && %{ $st->{bg} };
+      # 在等我：提问 / 计划审批 / 开新会话卡片还没答，或者这一轮结尾的“下一步”框在问我
+      $st->{waitId} = '' if $st->{waitId} ne '' && defined $st->{waitAt} && $st->{waitAt} < $old;
+      my $asking = ($st->{waitId} ne '' || (defined $st->{askAt} && $st->{askAt} >= $old && $st->{kind} eq 'assistant' && $st->{stop} eq 'end_turn'));
+      $status = 'input' if $asking;
       # 会话自己报的“在等我决定”（授权框、提问、MCP 表单）比上面的猜测准：标记之后 transcript 没有新内容就算数
       # （答完会写工具结果，transcript 就比标记新了；会话没来得及清掉标记也不会一直挂着）
       my $flag = "$inputDir/$id";

@@ -200,6 +200,58 @@ $got = JSON::PP->new->utf8->decode($out);
 is($s{bbbb}{status}, 'running', 'a new human prompt makes the session running again');
 is($s{bbbb}{total}, 0, 'a list finished before this turn is not shown');
 
+# ── 会话 f：桌面版的任务清单（update_plan）；派了一个后台命令，这一轮结束了，完成通知还没来 ──
+my %fm = (model => 'claude-opus-5-5', in => 1, cw => 0, cr => 0, out => 1);
+my @f;
+push @f, human('uf', iso($t0), 'go', '/Users/u/work');
+push @f, assistant(%fm, id => 'msg_f1', uuid => 'f1', ts => iso($t0 + 5), stop => 'tool_use',
+  content => [ tool('tf1', 'mcp__ccd_turn__update_plan', obj(items => [
+    obj(content => 'Look around', status => 'in_progress'), obj(content => 'Fetch files', status => 'pending'), obj(content => 'Try it', status => 'pending') ],
+    scope => 'first_task')) ]);
+push @f, assistant(%fm, id => 'msg_f2', uuid => 'f2', ts => iso($t0 + 20), stop => 'tool_use',
+  content => [ tool('tf2', 'mcp__ccd_turn__update_plan', obj(advance => JSON::PP::true)), tool('tf3', 'Bash', obj(command => 'fetch', run_in_background => JSON::PP::true)) ]);
+push @f, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
+  message => obj(role => 'user', content => [ obj(tool_use_id => 'tf3', type => 'tool_result', content => 'Command running in background with ID: bg1') ]),
+  uuid => 'f3', timestamp => iso($t0 + 21), toolUseResult => obj(stdout => '', stderr => '', backgroundTaskId => 'bg1'));
+push @f, assistant(%fm, id => 'msg_f4', uuid => 'f4', ts => iso($t0 + 25), stop => 'end_turn', content => [ obj(type => 'text', text => 'fetching') ]);
+put("$proj/ffff.jsonl", join("\n", @f) . "\n");
+touch("$proj/ffff.jsonl", $now - 300);
+# ── 会话 g：这一轮结尾的“下一步”框在问我（wrap_up 带 ask） ──
+my @g;
+push @g, human('ug', iso($t0), 'go', '/Users/u/work');
+push @g, assistant(%fm, id => 'msg_g1', uuid => 'g1', ts => iso($t0 + 5), stop => 'tool_use',
+  content => [ tool('tg1', 'mcp__ccd_turn__wrap_up', obj(recap => 'Done.', ask => 'Push now?', actions => [ obj(label => 'Push') ])) ]);
+push @g, assistant(%fm, id => 'msg_g2', uuid => 'g2', ts => iso($t0 + 6), stop => 'end_turn', content => [ obj(type => 'text', text => '') ]);
+put("$proj/gggg.jsonl", join("\n", @g) . "\n");
+touch("$proj/gggg.jsonl", $now - 300);
+$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app"`;
+$got = JSON::PP->new->utf8->decode($out);
+%s = map { $_->{id} => $_ } @{ $got->{sessions} };
+is($s{ffff}{status}, 'running', 'turn ended but a background command is still running = running');
+is_deeply([ map { [$_->{t}, $_->{s}] } @{ $s{ffff}{steps} } ],
+  [['Look around', 'completed'], ['Fetch files', 'in_progress'], ['Try it', 'pending']], 'update_plan steps (items + advance)');
+is("$s{ffff}{done}/$s{ffff}{total}", '1/3', 'update_plan done/total');
+is($s{gggg}{status}, 'input', 'wrap_up with an ask, turn ended = input');
+# 完成通知来了、会话接着做完；我答了 g 的问题
+push @f, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
+  message => obj(role => 'user', content => "<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"),
+  uuid => 'f5', timestamp => iso($t0 + 200));
+push @f, assistant(%fm, id => 'msg_f6', uuid => 'f6', ts => iso($t0 + 210), stop => 'tool_use',
+  content => [ tool('tf6', 'mcp__ccd_turn__wrap_up', obj(recap => 'Fetched.')) ]);
+push @f, assistant(%fm, id => 'msg_f7', uuid => 'f7', ts => iso($t0 + 211), stop => 'end_turn', content => [ obj(type => 'text', text => 'ok') ]);
+put("$proj/ffff.jsonl", join("\n", @f) . "\n");
+touch("$proj/ffff.jsonl", $now - 300);
+push @g, human('ug2', iso($now - 5), 'Push');
+put("$proj/gggg.jsonl", join("\n", @g) . "\n");
+touch("$proj/gggg.jsonl", $now - 5);
+$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app"`;
+$got = JSON::PP->new->utf8->decode($out);
+%s = map { $_->{id} => $_ } @{ $got->{sessions} };
+is($s{ffff}{status}, 'done', 'completion notice arrived and the turn ended = done');
+is($s{ffff}{steps}[1]{s}, 'completed', 'wrap_up checks off the step in progress');
+is($s{gggg}{status}, 'running', 'answering the ask clears input');
+unlink "$proj/ffff.jsonl", "$proj/gggg.jsonl";   # 下面的共享目录测试按 3 个会话核对
+
 # ── 跨设备共享：共享目录里一份别的电脑的、一份过期的、一份本机名的冲突副本、一份坏的、一份临时文件 ──
 my $sh = "$home/shared";
 my $nowMs = int($now * 1000);
