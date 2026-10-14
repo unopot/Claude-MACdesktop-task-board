@@ -216,7 +216,7 @@ push @f, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
 push @f, assistant(%fm, id => 'msg_f4', uuid => 'f4', ts => iso($t0 + 25), stop => 'end_turn', content => [ obj(type => 'text', text => 'fetching') ]);
 put("$proj/ffff.jsonl", join("\n", @f) . "\n");
 touch("$proj/ffff.jsonl", $now - 300);
-# ── 会话 g：这一轮结尾的“下一步”框在问我（wrap_up 带 ask） ──
+# ── 会话 g：这一轮结尾的“下一步”框里有个问题（wrap_up 带 ask）：不是弹出来要我点的，这一轮算做完 ──
 my @g;
 push @g, human('ug', iso($t0), 'go', '/Users/u/work');
 push @g, assistant(%fm, id => 'msg_g1', uuid => 'g1', ts => iso($t0 + 5), stop => 'tool_use',
@@ -231,7 +231,7 @@ is($s{ffff}{status}, 'running', 'turn ended but a background command is still ru
 is_deeply([ map { [$_->{t}, $_->{s}] } @{ $s{ffff}{steps} } ],
   [['Look around', 'completed'], ['Fetch files', 'in_progress'], ['Try it', 'pending']], 'update_plan steps (items + advance)');
 is("$s{ffff}{done}/$s{ffff}{total}", '1/3', 'update_plan done/total');
-is($s{gggg}{status}, 'input', 'wrap_up with an ask, turn ended = input');
+is($s{gggg}{status}, 'done', 'a question in the next-step box is not needs input: turn ended = done');
 # 完成通知来了、会话接着做完；我答了 g 的问题
 push @f, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
   message => obj(role => 'user', content => "<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"),
@@ -249,7 +249,7 @@ $got = JSON::PP->new->utf8->decode($out);
 %s = map { $_->{id} => $_ } @{ $got->{sessions} };
 is($s{ffff}{status}, 'done', 'completion notice arrived and the turn ended = done');
 is($s{ffff}{steps}[1]{s}, 'completed', 'wrap_up checks off the step in progress');
-is($s{gggg}{status}, 'running', 'answering the ask clears input');
+is($s{gggg}{status}, 'running', 'replying starts a new turn');
 unlink "$proj/ffff.jsonl", "$proj/gggg.jsonl";   # 下面的共享目录测试按 3 个会话核对
 
 # ── 跨设备共享：共享目录里一份别的电脑的、一份过期的、一份本机名的冲突副本、一份坏的、一份临时文件 ──

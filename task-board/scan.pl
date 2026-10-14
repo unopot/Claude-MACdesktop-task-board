@@ -138,7 +138,6 @@ sub new_file_state {
     todoT => {}, lastDone => undef,
     turnAt => undef,     # 这一轮用户提问的时间（没有任务清单时的总耗时从这里算）
     bg => {},            # 还在后台跑的活：编号 -> 派出去的时间（UTC 秒）
-    askAt => undef,      # 这一轮结尾的“下一步”框在问我（wrap_up 带 ask）的时间
     waitId => '', waitAt => undef,   # 还没答的提问 / 计划审批 / 开新会话卡片：工具调用 id 和时间
     model => '', tool => '', firstTs => undef, lastTs => undef, effort => '', calls => 0,   # 子代理行用
   };
@@ -222,7 +221,7 @@ sub read_new {
       $st->{turnAt} = $lts;
       # 新一轮已经开始：上一轮的 end_turn 不再代表“做完了”
       $st->{kind} = 'user'; $st->{stop} = '';
-      $st->{askAt} = undef; $st->{waitId} = '';   # 我发了话 = 上一轮问我的已经答了
+      $st->{waitId} = '';   # 我发了话 = 上一轮问我的已经答了
     }
     # 派到后台：Bash 的 backgroundTaskId，子代理 / Workflow 的 async_launched（只看 toolUseResult 里没转义的字段）
     my $tr = index($line, '"toolUseResult":{');
@@ -243,9 +242,6 @@ sub read_new {
         if ($line =~ $rxModel) { $st->{model} = $1 }
         my @tools = ($line =~ /$rxTool/g);
         if (@tools) { $st->{tool} = $tools[-1]; $st->{calls} += scalar @tools }
-        # 这一轮的“下一步”框：带 ask 就是在问我（按钮答完会作为我发的话进来）
-        my $wu = index($line, '"name":"mcp__ccd_turn__wrap_up","input":{');
-        if ($wu >= 0) { $st->{askAt} = index($line, '"ask":"', $wu) >= 0 ? $lts : undef }
         if ($line =~ $rxWaitTool && ($2 ne 'mcp__ccd_session__start_session' || index($line, '"initiation":"offer"') >= 0)) {
           $st->{waitId} = $1; $st->{waitAt} = $lts;
         }
@@ -525,9 +521,9 @@ sub scan_round {
       my $old = $now - $PENDING_MAX_SEC;
       for my $bk (keys %{ $st->{bg} }) { delete $st->{bg}{$bk} if $st->{bg}{$bk} < $old }
       $status = 'running' if ($status eq 'done' || $status eq 'idle') && %{ $st->{bg} };
-      # 在等我：提问 / 计划审批 / 开新会话卡片还没答，或者这一轮结尾的“下一步”框在问我
+      # 在等我：弹出来要我点的提问 / 计划审批 / 开新会话卡片还没答（这一轮结尾“下一步”框里的问题不算：那一轮已经做完了）
       $st->{waitId} = '' if $st->{waitId} ne '' && defined $st->{waitAt} && $st->{waitAt} < $old;
-      my $asking = ($st->{waitId} ne '' || (defined $st->{askAt} && $st->{askAt} >= $old && $st->{kind} eq 'assistant' && $st->{stop} eq 'end_turn'));
+      my $asking = ($st->{waitId} ne '');
       $status = 'input' if $asking;
       # 会话自己报的“在等我决定”（授权框、提问、MCP 表单）比上面的猜测准：标记之后 transcript 没有新内容就算数
       # （答完会写工具结果，transcript 就比标记新了；会话没来得及清掉标记也不会一直挂着）
