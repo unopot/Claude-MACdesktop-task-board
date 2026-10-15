@@ -324,6 +324,7 @@ function boardFrom(got: ScanLine, b: Board): Board {
     usage: parseUsage(got.usageText),
     inputDir: got.inputDir,
     livePusher: got.livePusher,
+    warn: got.sharedWarn,
   }
 }
 
@@ -1075,6 +1076,7 @@ export const register: Register = (on, options) => {
               <Text wrap="truncate-end">
                 <Text bold>Running</Text>
                 <Text dimColor> {live.length} · {fmt(tokens)} tok</Text>
+                {b.warn && <Text color={HEX.input}> · {b.warn}</Text>}
               </Text>
             </Box>
             {usageMini(true)}
@@ -1481,8 +1483,13 @@ export const register: Register = (on, options) => {
             <Box flexDirection="row" alignItems="center" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
               <Text bold>Running</Text>
               <Box flexShrink={1} minWidth={0} overflow="hidden">
-                <Text dimColor wrap="truncate-end">{live.length} · {fmt(tokens)} tok</Text>
+                <Text dimColor wrap="truncate-end">{live.length} · {fmt(tokens)} tok{b.warn ? ` · ` : ''}</Text>
               </Box>
+              {b.warn && (
+                <Box flexShrink={1} minWidth={0} overflow="hidden">
+                  <Text color={HEX.input} wrap="truncate-end">{b.warn}</Text>
+                </Box>
+              )}
             </Box>
             {ctxRing}
             {ring}

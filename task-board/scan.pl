@@ -47,6 +47,13 @@ my $prefsPath = "$home/.claude/task-board-prefs.json";
 my $usagePath = "$home/.claude/task-board-usage.json";
 # iPhone Live 推送器的配置：本机有它，任务板上才画「iPhone Live」开关（开关存在 prefs 的 liveActivity，推送器读同一个文件）
 my $livePath = "$home/.claude/task-board-live.json";
+# iCloud 上传有没有卡住（2026-10-14 卡了 4 个多小时才有人发现：别的电脑和手机一直看不到 Mac 的会话）：
+# 共享目录在 iCloud 里时，每 5 分钟往共享目录放一个探针小文件，90 秒后看 brctl status 的待上传清单里它还在不在；
+# 还在 = 卡住了，输出 sharedWarn 让任务板红字提示，之后每分钟再看，传上去了就清掉。
+# 探针不用 .json 后缀（.json 会被当成电脑快照读）。测试用 TASK_BOARD_BRCTL 换一个假的 brctl、TASK_BOARD_UPLOAD_WAIT_SEC 改等待
+my $BRCTL = $ENV{TASK_BOARD_BRCTL} // '/usr/bin/brctl';
+my $UPLOAD_WAIT_SEC = $ENV{TASK_BOARD_UPLOAD_WAIT_SEC} // 90;
+my ($uploadProbeAt, $uploadLastCheck, $uploadStuckSince, $uploadPending) = (0, 0, 0, 0);
 # “在等我决定”的标记：每个会话一个文件（文件名 = 会话 id，内容 = 标记时间毫秒，空 = 没在等）
 my $inputDir = "$home/.claude/task-board-input";
 mkdir $inputDir unless -d $inputDir;
@@ -64,6 +71,8 @@ if ($shared ne '' && !-d $shared) {
   eval { File::Path::make_path($shared) };
   $shared = '' unless -d $shared;   # 建不出来（同步盘没装）就当没开
 }
+
+unlink "$shared/$device-upload-check.txt" if $shared ne '' && $device ne '';
 # 同一台电脑只让一个扫描进程真扫：App 让最近打开过的会话都在后台挂着，每个会话各起一个扫描进程，
 # 十几个一起扫既费 CPU，又一起写共享目录里的快照（iCloud 会记成冲突，对面电脑看到的就成了 Mac(1).json）。
 # 拿到锁的是主扫描，每轮把输出写进 $leadPath；其他的只转发这一份。主扫描所在的会话关了，锁随之释放，谁先拿到谁接手。
@@ -632,11 +641,13 @@ sub scan_round {
   my $usageText = '';
   if (-f $usagePath) { my $t = slurp($usagePath); $usageText = defined $t ? decode('UTF-8', $t) : '' }
   my $nowMs = int($now * 1000);
+  my $sharedWarn = $shared ne '' ? upload_check($now) : '';
   my $line = $json->encode({
     at => $nowMs, device => $device, os => $os, sessions => \@out,
     prefs => { nextSteps => $nextSteps, hidden => \%hidden, liveActivity => $liveActivity }, prefsPath => $prefsPath,
     usagePath => $usagePath, usageText => $usageText, inputDir => $inputDir,
     (-f $livePath ? (livePusher => JSON::PP::true) : ()),
+    ($sharedWarn ne '' ? (sharedWarn => $sharedWarn) : ()),
   });
   my $writeSnap = $now - $lastSnap >= 10;
   # 跨设备共享：本机快照（不含 remote，不然两边会互相套进去越滚越大）写到共享目录；再读其他电脑的快照
@@ -699,6 +710,52 @@ sub scan_round {
     $lastSnap = $now;
     swap_in($line, $snapPath);
   }
+}
+
+# iCloud 上传卡住的检查（见开头 $BRCTL 那段）。返回提示文字，'' = 没卡（或还没到检查时间、或共享目录不在 iCloud 里）
+sub upload_check {
+  my ($now) = @_;
+  return '' unless $ENV{TASK_BOARD_BRCTL} || $shared =~ m{/Mobile Documents/com~apple~CloudDocs/};
+  my $probe = "$shared/$device-upload-check.txt";
+  if (!$uploadProbeAt) {
+    return upload_warn($now) if $now - $uploadLastCheck < ($uploadStuckSince ? 60 : 300);
+    write_in_place("$now\n", $probe);
+    $uploadProbeAt = $now;
+  }
+  return upload_warn($now) if $now - $uploadProbeAt < $UPLOAD_WAIT_SEC;
+  # brctl status 平时不到 1 秒，队列堆了几千条时要几秒：最多等 8 秒（闹钟借用的套路同读远端快照）
+  my $guardLeft = alarm 0;
+  my $text = eval {
+    local $SIG{ALRM} = sub { die "timeout\n" };
+    alarm 8;
+    my $t = `"$BRCTL" status com.apple.CloudDocs 2>/dev/null`;
+    alarm 0;
+    $t;
+  };
+  alarm 0;
+  alarm($guardLeft > 0 ? $guardLeft : 1) if ref $SIG{ALRM} eq 'CODE';
+  my $wrote = $uploadProbeAt;
+  ($uploadProbeAt, $uploadLastCheck) = (0, $now);
+  return upload_warn($now) unless defined $text;   # brctl 没跑成：这次不下结论
+  # brctl 把文件名缩写成 首字{中间几个}尾字.扩展名（Mac.json → M{1}c.json）
+  my $name = "$device-upload-check";
+  my $abbr = length($name) > 2 ? substr($name, 0, 1) . '{' . (length($name) - 2) . '}' . substr($name, -1) : $name;
+  my @pending = grep { /up:needs-sync-up/ } split /\n/, $text;
+  if (grep { index($_, "n:\"$abbr.txt\"") >= 0 } @pending) {
+    $uploadStuckSince ||= $wrote;
+    $uploadPending = scalar @pending;
+  } else {
+    ($uploadStuckSince, $uploadPending) = (0, 0);
+    unlink $probe;
+  }
+  return upload_warn($now);
+}
+
+sub upload_warn {
+  my ($now) = @_;
+  return '' unless $uploadStuckSince;
+  my $min = int(($now - $uploadStuckSince) / 60);
+  return "iCloud has not uploaded this computer's snapshot for $min min ($uploadPending files waiting): other computers and the phone can't see its sessions";
 }
 
 # 叫 iCloud 下载共享目录里还没下载的文件：后台跑 brctl，不等它；同一个文件 10 秒内只叫一次

@@ -302,4 +302,26 @@ ok($got->{prefs}{nextSteps}, 'nextSteps is read alongside');
 
 sub slurp_t { my ($p) = @_; open(my $fh, '<:raw', $p) or return ''; local $/; my $t = <$fh>; close $fh; return $t }
 
+
+# ── iCloud 上传卡住的检查：假 brctl 说探针还在待上传清单里 → sharedWarn；说传上去了 → 没有 sharedWarn、探针删掉 ──
+my $fake = "$home/brctl-stuck";
+put($fake, "#!/bin/sh\nprintf '%s\\n' 'x' '        r:1 up:needs-sync-up st{n:\"M{1}i.json\" doc}' '        r:2 up:needs-sync-up st{n:\"M{15}k.txt\" doc}'\n");
+chmod 0755, $fake;
+{
+  local $ENV{TASK_BOARD_BRCTL} = $fake;
+  local $ENV{TASK_BOARD_UPLOAD_WAIT_SEC} = 0;
+  $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "$sh" --device Mini`;
+  $got = JSON::PP->new->utf8->decode($out);
+  like($got->{sharedWarn}, qr/^iCloud has not uploaded .* \(2 files waiting\)/, 'probe still waiting in brctl = sharedWarn with the queue size');
+  ok(-f "$sh/Mini-upload-check.txt", 'probe file stays while stuck');
+  put($fake, "#!/bin/sh\nprintf '%s\\n' 'x' '        r:1 up:needs-sync-up st{n:\"M{1}i.json\" doc}'\n");
+  $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "$sh" --device Mini`;
+  $got = JSON::PP->new->utf8->decode($out);
+  ok(!exists $got->{sharedWarn}, 'probe uploaded = no sharedWarn');
+  ok(!-f "$sh/Mini-upload-check.txt", 'probe file removed once uploaded');
+}
+$out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app" --shared "$sh" --device Mini`;
+$got = JSON::PP->new->utf8->decode($out);
+ok(!exists $got->{sharedWarn}, 'shared folder outside iCloud: no check, no sharedWarn');
+
 done_testing();

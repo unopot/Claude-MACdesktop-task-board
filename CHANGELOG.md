@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.2
+- **Warns when iCloud stops uploading.** Every 5 minutes the scanner drops a small probe file into the shared folder and checks 90 seconds later whether iCloud has uploaded it (`brctl status`). If not, the Running header shows a yellow warning with how long the upload has been stuck and how many files are waiting, so the other computer and the phone going blind no longer goes unnoticed for hours. Cleared as soon as the probe uploads. Only when the shared folder is in iCloud Drive.
+
 ## 2.6.1
 - **Only pop-ups turn a card yellow.** A question in the next-step box at the end of a turn no longer counts as needs input: that turn is done (green). Yellow is for things that pop up and wait for your click: permission dialogs, questions, plan approvals, MCP forms and "New session / Do it here" cards.
 

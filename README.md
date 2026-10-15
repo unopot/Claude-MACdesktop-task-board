@@ -77,7 +77,7 @@ Do this on **every** computer that should take part.
 
 ### If the other computer does not show up
 
-- Look in the shared folder: there must be one `<label>.json` per computer, updated every 10 seconds while a session is open. A missing file means that computer has not written yet (plugin not installed, app not restarted, or no session open); a file older than 10 minutes means its last session closed or the drive stopped syncing.
+- Look in the shared folder: there must be one `<label>.json` per computer, updated every 10 seconds while a session is open. On a Mac the Running header turns up a yellow warning when iCloud has stopped uploading (it checks with a probe file every 5 minutes); in that case fix iCloud Drive first (a huge backlog of deleted files, e.g. from a git repository that lived in iCloud, can block all uploads — turning iCloud Drive off and on in System Settings resets it). A missing file means that computer has not written yet (plugin not installed, app not restarted, or no session open); a file older than 10 minutes means its last session closed or the drive stopped syncing.
 - Both computers must point at the **same folder of the same drive**. The paths differ per operating system, the folder does not.
 - Two computers with the same label show up as one. Change one label.
 - The drive must actually download the files (no "online-only" placeholders).

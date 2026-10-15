@@ -78,11 +78,15 @@ export type Board = {
   inputDir?: string
   /** 本机装了 iPhone Live 推送器（有 ~/.claude/task-board-live.json），任务板才画 iPhone Live 开关 */
   livePusher?: boolean
+  /** 扫描进程发现本机快照传不上同步盘（iCloud 上传卡住）：任务板标题行红字提示 */
+  warn?: string
 }
 
 /** 扫描进程输出的一行（也是共用快照 ~/.claude/task-board-snapshot.json 的内容）；usageText = 用量文件原文 */
 export type ScanLine = Pick<Board, 'at' | 'sessions' | 'prefs' | 'prefsPath' | 'usagePath' | 'inputDir' | 'livePusher'> & {
   usageText?: string
+  /** iCloud 上传卡住的提示（Mac 的扫描脚本每 5 分钟放探针文件验一次）；没卡就没有 */
+  sharedWarn?: string
   /** 本机标签（设置项 deviceName；共享目录里的文件名）和系统（win / mac） */
   device?: string
   os?: string
