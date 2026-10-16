@@ -108,6 +108,7 @@ my $rxEffort = qr/"effort":"([a-z]+)"/;
 my $rxBgCmd = qr/"backgroundTaskId":"([A-Za-z0-9_-]+)"/;
 my $rxBgAsync = qr/"(?:agentId|taskId)":"([A-Za-z0-9_-]+)"/;
 my $rxBgDone = qr{<task-id>([A-Za-z0-9_-]+)</task-id>(?:(?!</task-notification>).)*?<status>(?:completed|failed|killed|stopped)</status>};
+my $rxBgStop = qr/"task_id":"([A-Za-z0-9_-]+)"/;
 # 要我答了才继续的工具：提问、计划审批、“开新会话 / 在这里做”卡片（start_session 的 offer）
 my $rxWaitTool = qr/"type":"tool_use","id":"([^"]+)","name":"(AskUserQuestion|ExitPlanMode|mcp__ccd_session__start_session)"/;
 # 后台的活和“在等我”的工具超过这么久还没结果就不算了（会话被关掉、App 重启时不会有完成通知）
@@ -240,6 +241,8 @@ sub read_new {
       if ($rest =~ $rxBgCmd) { $bid = $1 }
       elsif (index($rest, '"status":"async_launched"') >= 0 && $rest =~ $rxBgAsync) { $bid = $1 }
       $st->{bg}{$bid} = defined $lts ? $lts : time if defined $bid;
+      # TaskStop 停掉的不会再有完成通知：停成功就算结束
+      delete $st->{bg}{$1} if %{ $st->{bg} } && index($rest, '"message":"Successfully stopped task') >= 0 && $rest =~ $rxBgStop;
     }
     if (%{ $st->{bg} } && index($line, '<task-id>') >= 0) {
       delete $st->{bg}{$1} while $line =~ /$rxBgDone/g;

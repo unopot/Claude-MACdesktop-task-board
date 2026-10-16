@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.3
+- **A background task stopped with TaskStop counts as finished.** A stopped task never sends a completion notice, so the card stayed running for up to 6 hours after the turn ended.
+
 ## 2.6.2
 - **Warns when iCloud stops uploading.** Every 5 minutes the scanner drops a small probe file into the shared folder and checks 90 seconds later whether iCloud has uploaded it (`brctl status`). If not, the Running header shows a yellow warning with how long the upload has been stuck and how many files are waiting, so the other computer and the phone going blind no longer goes unnoticed for hours. Cleared as soon as the probe uploads. Only when the shared folder is in iCloud Drive.
 
