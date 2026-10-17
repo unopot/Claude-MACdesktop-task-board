@@ -1201,6 +1201,7 @@ export const register: Register = (on, options) => {
       return (
         <Box
           key={`row-${s.id}`}
+          position="relative"
           flexDirection="column"
           // 带边框的 Box 桌面上会自动加约 10px 的上下内边距；显式给 0.5 行单位（约 5px）盖掉它
           paddingY={0.5}
@@ -1214,6 +1215,8 @@ export const register: Register = (on, options) => {
           backgroundColor={isSelf ? ACCENT_TINT : isDown ? PRESS_BG : undefined}
           hover={isSelf || isDown || !canOpen(s) ? undefined : HOVER}
         >
+          {/* 整张卡都可点：点击层铺满整卡、放在最前面，右上角的展开 / 隐藏按钮画在它上面 */}
+          {!isSelf && canOpen(s) && hit(`go-${s.id}`, `go:${s.id}`, s.id)}
           <Box flexDirection="row" alignItems="center" gap={1}>
             <Box position="relative" flexDirection="row" alignItems="center" gap={1} flexGrow={1} minWidth={0}>
               <Text color={HEX[s.status]}>●</Text>
@@ -1234,7 +1237,6 @@ export const register: Register = (on, options) => {
                   <Text dimColor> · {fmt(billed(s))}</Text>
                 </Text>
               </Box>
-              {!isSelf && canOpen(s) && hit(`go-${s.id}`, `go:${s.id}`, s.id)}
             </Box>
             {kind === 'live' ? (
               <Box key={`xb-${s.id}`} position="relative" flexShrink={0} hover={HOVER_BG}>
@@ -1251,7 +1253,6 @@ export const register: Register = (on, options) => {
           {/* 纵向排列的 Box 会把里面的 Svg 图片拉满整宽（横向排列时图片只有默认宽度） */}
           <Box position="relative" flexDirection="column">
             <Svg source={lineSvg(st.frac, st.color)} alt={`${s.title}: ${st.text}`} height={6} />
-            {!isSelf && canOpen(s) && hit(`go2-${s.id}`, `go:${s.id}`, s.id)}
           </Box>
         </Box>
       )
@@ -1639,6 +1640,7 @@ export const register: Register = (on, options) => {
             return (
               <Box
                 key={`pane-row-${s.id}`}
+                position="relative"
                 flexDirection="column"
                 marginTop={isDown ? 1 + PRESS_ROWS : 1}
                 marginBottom={isDown ? -PRESS_ROWS : undefined}
@@ -1649,6 +1651,7 @@ export const register: Register = (on, options) => {
                 backgroundColor={isSelf ? ACCENT_TINT : isDown ? PRESS_BG : undefined}
                 hover={canGo && !isDown ? HOVER : undefined}
               >
+                {canGo && hit(`pane-go-${s.id}`, `go:${s.id}`, s.id)}
                 <Box flexDirection="row" alignItems="center" gap={1}>
                   <Box position="relative" flexDirection="row" alignItems="center" gap={1} flexGrow={1}>
                     {isRemote(s) && (
@@ -1676,7 +1679,6 @@ export const register: Register = (on, options) => {
                         <Text dimColor> · {fmt(billed(s))} tok</Text>
                       </Text>
                     </Box>
-                    {canGo && hit(`pane-go-${s.id}`, `go:${s.id}`, s.id)}
                   </Box>
                   {hid && (
                     <Box key={`pane-unhide-${s.id}`} position="relative" flexShrink={0} paddingX={1} hover={HOVER_BG}>
@@ -1688,7 +1690,6 @@ export const register: Register = (on, options) => {
                 <Box position="relative" flexDirection="column">
                   <Text dimColor wrap="truncate-end">{subtitle(s)}</Text>
                   <Svg source={lineSvg(frac, HEX[s.status])} alt={`${s.title}: ${right(s)}`} height={6} />
-                  {canGo && hit(`pane-go2-${s.id}`, `go:${s.id}`, s.id)}
                 </Box>
               </Box>
             )
