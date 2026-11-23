@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.8.0
+- **Background-only sessions are green.** When a turn has ended and only a background command is still running (for example a watcher started with `run_in_background`), the card stays under Running but is drawn green with `background`, sorted last, and not counted in the blue running count. A background subagent or workflow still counts as work in progress (blue). The scanner reports this as `bgOnly` on each session (same field as the Windows scanner). The menu bar counter and floating window do not use it yet.
+
 ## 2.7.0
 - **Floating window.** A small always-on-top window that lists every session, grouped by computer (this Mac first, then each other computer, with an Apple or Windows logo), outside any session. The desktop app does not draw the board while you view another computer's session over Remote Control; this window is there regardless. Click a card to switch to that session (the card sinks while pressed), drag an edge to resize, drag the title bar to move; position and size are remembered. It starts with a session and quits two minutes after the desktop app is closed. Its close button hides it until you tick **Floating window** in the menu bar counter's menu. New setting **Floating window** (on by default); off stops it.
 - `menubar.pl` now launches both the menu bar counter and the floating window (`stop floatwin` stops the window).

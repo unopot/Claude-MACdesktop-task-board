@@ -21,6 +21,8 @@ export type SessionRow = {
   output: number
   subagents: number
   subActive: number
+  /** 这一轮已经结束、只剩后台命令在跑（run_in_background 的盯守脚本等；没有在跑的子代理、Workflow）：status 照旧是 running，任务板显示成绿色。旧扫描没有这个字段 */
+  bgOnly?: boolean
   /** 任务清单的每一步；sec = 耗时秒数（进行中 = 已进行多久，未开始 = -1） */
   steps?: Step[]
   /** 任务清单总耗时（第一步建立起到现在或到最后一步完成）；没有清单 = -1 */

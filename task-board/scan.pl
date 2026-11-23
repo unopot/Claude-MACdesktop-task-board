@@ -148,6 +148,7 @@ sub new_file_state {
     todoT => {}, lastDone => undef,
     turnAt => undef,     # 这一轮用户提问的时间（没有任务清单时的总耗时从这里算）
     bg => {},            # 还在后台跑的活：编号 -> 派出去的时间（UTC 秒）
+    bgAgent => {},       # 其中派出去的是子代理 / Workflow（不是后台命令）的编号：它们在跑 = 还有活在做
     waitId => '', waitAt => undef,   # 还没答的提问 / 计划审批 / 开新会话卡片：工具调用 id 和时间
     model => '', tool => '', firstTs => undef, lastTs => undef, effort => '', calls => 0,   # 子代理行用
   };
@@ -239,7 +240,7 @@ sub read_new {
       my $rest = substr($line, $tr);
       my $bid;
       if ($rest =~ $rxBgCmd) { $bid = $1 }
-      elsif (index($rest, '"status":"async_launched"') >= 0 && $rest =~ $rxBgAsync) { $bid = $1 }
+      elsif (index($rest, '"status":"async_launched"') >= 0 && $rest =~ $rxBgAsync) { $bid = $1; $st->{bgAgent}{$bid} = 1 }
       $st->{bg}{$bid} = defined $lts ? $lts : time if defined $bid;
       # TaskStop 停掉的不会再有完成通知：停成功就算结束
       delete $st->{bg}{$1} if %{ $st->{bg} } && index($rest, '"message":"Successfully stopped task') >= 0 && $rest =~ $rxBgStop;
@@ -532,7 +533,11 @@ sub scan_round {
       # 派到后台的活还没收到完成通知：这一轮虽然结束了（end_turn），活还在跑，跑完会叫醒会话接着做
       my $old = $now - $PENDING_MAX_SEC;
       for my $bk (keys %{ $st->{bg} }) { delete $st->{bg}{$bk} if $st->{bg}{$bk} < $old }
+      my $turnOver = ($status eq 'done' || $status eq 'idle');
       $status = 'running' if ($status eq 'done' || $status eq 'idle') && %{ $st->{bg} };
+      # 这一轮已经结束、只剩后台命令在跑（盯守脚本之类）：照旧算 running，任务板显示成绿色（用户 2026-11-23 定）。
+      # 派出去的子代理 / Workflow 还没完、或者有子代理在写 = 还有活在做，不算
+      my $bgOnly = $turnOver && %{ $st->{bg} } && $sub{active} == 0 && !grep { $st->{bgAgent}{$_} } keys %{ $st->{bg} };
       # 在等我：弹出来要我点的提问 / 计划审批 / 开新会话卡片还没答（这一轮结尾“下一步”框里的问题不算：那一轮已经做完了）
       $st->{waitId} = '' if $st->{waitId} ne '' && defined $st->{waitAt} && $st->{waitAt} < $old;
       my $asking = ($st->{waitId} ne '');
@@ -620,7 +625,7 @@ sub scan_round {
         id => $id, title => $title, link => $link, bridge => $bridge, project => $project, status => $status,
         ageSec => int($age), msgAgeSec => int($msgAge), cacheAgeSec => $cacheAge, done => $done, total => $total, current => $current,
         input => $st->{tin} + $sub{tin}, cacheWrite => $st->{tcw} + $sub{tcw}, cacheRead => $st->{tcr} + $sub{tcr}, output => $st->{tout} + $sub{tout},
-        subagents => $sub{n}, subActive => $sub{active},
+        subagents => $sub{n}, subActive => $sub{active}, bgOnly => (($status eq 'running' && $bgOnly) ? JSON::PP::true : JSON::PP::false),
         model => $st->{model}, effort => $st->{effort},
         steps => [ map { { t => $_->{t}, s => $_->{s}, sec => $_->{sec} } } @steps ], planSec => $planSec, turnSec => $turnSec,
         subs => [ map { { %$_, active => ($_->{active} ? JSON::PP::true : JSON::PP::false) } } @subRows ],

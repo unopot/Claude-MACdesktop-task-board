@@ -16,7 +16,8 @@ Expand a running card to see its task list by stage, how long each step took, wh
 
 | Color | Status | Meaning |
 | --- | --- | --- |
-| blue | `43%` / `running` | working, or the turn ended with background work (a background command, subagent or workflow) still running; the percentage is the task list's progress |
+| blue | `43%` / `running` | working, or the turn ended with a background subagent or workflow still running; the percentage is the task list's progress |
+| green | `background` | the turn ended and only a background command is still running (a watcher script, a long build): still counted as running, but listed last and drawn green so it does not ask for your attention |
 | yellow | `needs input` | waiting for you: a permission dialog, a question, a plan to approve, an MCP form, or a "New session / Do it here" card: something that pops up and waits for your click (a question in the next-step box at the end of a turn does not count; that turn is done) |
 | light blue | `waiting` | stopped on a long tool call that does not need you |
 

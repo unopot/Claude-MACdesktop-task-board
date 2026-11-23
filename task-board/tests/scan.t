@@ -241,6 +241,17 @@ push @h, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
 push @h, assistant(%fm, id => 'msg_h5', uuid => 'h5', ts => iso($t0 + 25), stop => 'end_turn', content => [ obj(type => 'text', text => 'stopped') ]);
 put("$proj/hhhh.jsonl", join("\n", @h) . "\n");
 touch("$proj/hhhh.jsonl", $now - 300);
+# ── 会話 k ──
+my @k;
+push @k, human('uk', iso($t0), 'go', '/Users/u/work');
+push @k, assistant(%fm, id => 'msg_k1', uuid => 'k1', ts => iso($t0 + 5), stop => 'tool_use',
+  content => [ tool('tk1', 'Agent', obj(description => 'look', prompt => 'look', run_in_background => JSON::PP::true)) ]);
+push @k, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
+  message => obj(role => 'user', content => [ obj(tool_use_id => 'tk1', type => 'tool_result', content => 'Async agent launched') ]),
+  uuid => 'k2', timestamp => iso($t0 + 6), toolUseResult => obj(isAsync => JSON::PP::true, status => 'async_launched', agentId => 'ag1', description => 'look'));
+push @k, assistant(%fm, id => 'msg_k3', uuid => 'k3', ts => iso($t0 + 10), stop => 'end_turn', content => [ obj(type => 'text', text => 'waiting') ]);
+put("$proj/kkkk.jsonl", join("\n", @k) . "\n");
+touch("$proj/kkkk.jsonl", $now - 300);
 $out =`/usr/bin/perl "$scan" --once --home "$home" --app "$app"`;
 $got = JSON::PP->new->utf8->decode($out);
 %s = map { $_->{id} => $_ } @{ $got->{sessions} };
@@ -250,6 +261,10 @@ is_deeply([ map { [$_->{t}, $_->{s}] } @{ $s{ffff}{steps} } ],
 is("$s{ffff}{done}/$s{ffff}{total}", '1/3', 'update_plan done/total');
 is($s{gggg}{status}, 'done', 'a question in the next-step box is not needs input: turn ended = done');
 is($s{hhhh}{status}, 'done', 'a background command stopped with TaskStop counts as finished');
+ok($s{ffff}{bgOnly}, 'turn ended, only a background command left = bgOnly (shown green)');
+ok(!$s{hhhh}{bgOnly}, 'not running = not bgOnly');
+is($s{kkkk}{status}, 'running', 'turn ended but a background agent has not come back = running');
+ok(!$s{kkkk}{bgOnly}, 'a pending background agent is still work in progress = not bgOnly');
 # 完成通知来了、会话接着做完；我答了 g 的问题
 push @f, line(parentUuid => 'p', isSidechain => JSON::PP::false, type => 'user',
   message => obj(role => 'user', content => "<task-notification>\n<task-id>bg1</task-id>\n<status>completed</status>\n</task-notification>"),
@@ -266,9 +281,10 @@ $out = `/usr/bin/perl "$scan" --once --home "$home" --app "$app"`;
 $got = JSON::PP->new->utf8->decode($out);
 %s = map { $_->{id} => $_ } @{ $got->{sessions} };
 is($s{ffff}{status}, 'done', 'completion notice arrived and the turn ended = done');
+ok(!$s{ffff}{bgOnly}, 'background command finished = no longer bgOnly');
 is($s{ffff}{steps}[1]{s}, 'completed', 'wrap_up checks off the step in progress');
 is($s{gggg}{status}, 'running', 'replying starts a new turn');
-unlink "$proj/ffff.jsonl", "$proj/gggg.jsonl", "$proj/hhhh.jsonl";   # 下面的共享目录测试按 3 个会话核对
+unlink "$proj/ffff.jsonl", "$proj/gggg.jsonl", "$proj/hhhh.jsonl", "$proj/kkkk.jsonl";   # 下面的共享目录测试按 3 个会话核对
 
 # ── 跨设备共享：共享目录里一份别的电脑的、一份过期的、一份本机名的冲突副本、一份坏的、一份临时文件 ──
 my $sh = "$home/shared";
