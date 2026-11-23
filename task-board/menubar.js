@@ -219,9 +219,36 @@ function run(argv) {
         },
       },
       'menuNeedsUpdate:': { types: ['void', ['id']], implementation: menu => fill(menu) },
+      'float:': { types: ['void', ['id']], implementation: () => toggleFloat() },
     },
   })
   const target = $.TaskBoardMenuTarget.alloc.init
+
+  // ── 浮窗（floatwin.js，和本脚本在同一个目录）：菜单里一项带勾的 Floating window，取消勾 = 隐藏，勾上 = 再显示 ──
+  // 隐藏 = 留一个标记文件（浮窗 2 秒内自己退出，启动器看到标记不再拉起）；显示 = 删掉标记，经启动器拉起。
+  // 设置项 Floating window 关着（启动器留了 .off 标记）或这个版本没有浮窗：不列这一项。
+  const root = scanPl.replace(/\/[^/]*$/, '')
+  const floatJs = `${root}/floatwin.js`
+  const floatHidden = `${home}/.claude/task-board-floatwin.hidden`
+  const floatOff = `${home}/.claude/task-board-floatwin.off`
+  const floatOffered = () => fm.fileExistsAtPath(floatJs) && !fm.fileExistsAtPath(floatOff)
+  function toggleFloat() {
+    if (!fm.fileExistsAtPath(floatHidden)) {
+      $('').writeToFileAtomicallyEncodingError(floatHidden, true, $.NSUTF8StringEncoding, null)
+      return
+    }
+    fm.removeItemAtPathError(floatHidden, null)
+    const t = $.NSTask.alloc.init
+    t.launchPath = '/usr/bin/perl'
+    t.arguments = $([`${root}/menubar.pl`, 'start', floatJs, scanPl, String(ttlMin), shared, device])
+    t.standardOutput = $.NSFileHandle.fileHandleWithNullDevice
+    t.standardError = $.NSFileHandle.fileHandleWithNullDevice
+    try {
+      t.launch
+    } catch (err) {
+      // 起不来：下一个会话启动时插件会再拉起
+    }
+  }
 
   function fill(menu) {
     load()
@@ -253,6 +280,13 @@ function run(argv) {
     const status = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(age < 0 ? 'Waiting for the first scan…' : age < 60 ? `Updated ${age} s ago` : `Last update ${Math.round(age / 60)} min ago — scanner stalled?`, null, '')
     status.enabled = false
     menu.addItem(status)
+    if (floatOffered()) {
+      const fi = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent('Floating window', 'float:', '')
+      fi.target = target
+      fi.state = fm.fileExistsAtPath(floatHidden) ? 0 : 1
+      fi.toolTip = 'A small always-on-top window that lists every session'
+      menu.addItem(fi)
+    }
     // 没有 Quit：关掉要去设置项 Menu bar counter（点了 Quit 要等下一个会话才回来，用户不要）
   }
 

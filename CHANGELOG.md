@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.7.0
+- **Floating window.** A small always-on-top window that lists every session, grouped by computer (this Mac first, then each other computer, with an Apple or Windows logo), outside any session. The desktop app does not draw the board while you view another computer's session over Remote Control; this window is there regardless. Click a card to switch to that session (the card sinks while pressed), drag an edge to resize, drag the title bar to move; position and size are remembered. It starts with a session and quits two minutes after the desktop app is closed. Its close button hides it until you tick **Floating window** in the menu bar counter's menu. New setting **Floating window** (on by default); off stops it.
+- `menubar.pl` now launches both the menu bar counter and the floating window (`stop floatwin` stops the window).
+
 ## 2.6.4
 - **The whole card is clickable.** Only the title row and the progress line used to open a session. A click is also no longer cancelled when the card sinks under the pointer: releasing on the spot opens the session the first time, instead of sometimes needing several clicks.
 

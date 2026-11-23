@@ -25,6 +25,11 @@ const menubarArgv = (root: string, ttlMin: number, shared: string, device: strin
   '/usr/bin/perl', `${root}/${MENUBAR_LAUNCHER}`, 'start', `${root}/menubar.js`, `${root}/${SCAN_SCRIPT}`, String(ttlMin), shared, device,
 ]
 const menubarStopArgv = (root: string) => ['/usr/bin/perl', `${root}/${MENUBAR_LAUNCHER}`, 'stop']
+/** 浮窗（floatwin.js，同一个启动器拉起）：不长在会话里的窄长小窗口，一直摊开列出所有会话；这个平台没有浮窗 = null。 */
+const floatArgv = (root: string, ttlMin: number, shared: string, device: string): string[] | null => [
+  '/usr/bin/perl', `${root}/${MENUBAR_LAUNCHER}`, 'start', `${root}/floatwin.js`, `${root}/${SCAN_SCRIPT}`, String(ttlMin), shared, device,
+]
+const floatStopArgv = (root: string): string[] | null => ['/usr/bin/perl', `${root}/${MENUBAR_LAUNCHER}`, 'stop', 'floatwin']
 /** 交给 macOS 的 open 打开 claude:// 链接，Claude 应用会切到对应会话。 */
 const openArgv = (link: string) => ['/usr/bin/open', link]
 /** 本机标签的默认值（设置项 deviceName 为空时用）：卡片上的灰色小标签、共享目录里的文件名都用它；有几台机器就各设各的。 */
@@ -60,6 +65,8 @@ let SHARED_DIR = ''
 let DEVICE = ''
 /** 菜单栏开关（设置项 menuBar，默认开） */
 let MENU_BAR = true
+/** 浮窗开关（设置项 floatWindow，默认开；这个平台没有浮窗时不起作用） */
+let FLOAT_WINDOW = true
 
 /** 缓存还剩几秒：从主 transcript 最后一次请求起算；没有请求过返回 null。 */
 const cacheLeft = (s: SessionRow) => (s.cacheAgeSec >= 0 ? TTL_SEC - s.cacheAgeSec : null)
@@ -182,10 +189,10 @@ async function publishStatus($: EngineInterface) {
   await $.ui.status(`${running} running / ${b.sessions.length} sessions · ${fmt(tokens)} tok`)
 }
 
-/** 本模块这次加载里已经确认过菜单栏（开着就确保在跑，关着就停掉），不用每次连上都再跑一遍启动器。 */
+/** 本模块这次加载里已经确认过菜单栏和浮窗（开着就确保在跑，关着就停掉），不用每次连上都再跑一遍启动器。 */
 let menubarChecked = false
 
-/** 菜单栏：设置项开着就确保在跑（启动器只留一个、脱离会话），关着就停掉。失败只记日志。 */
+/** 菜单栏、浮窗：设置项开着就确保在跑（启动器各只留一个、脱离会话），关着就停掉。失败只记日志。 */
 async function ensureMenubar($: EngineInterface) {
   if (menubarChecked) return
   menubarChecked = true
@@ -194,6 +201,11 @@ async function ensureMenubar($: EngineInterface) {
     const root = script.slice(0, script.length - SCAN_SCRIPT.length - 1)
     const r = await $.process.run(MENU_BAR ? menubarArgv(root, TTL_SEC / 60, SHARED_DIR, DEVICE) : menubarStopArgv(root))
     if (r.exitCode !== 0) $.ui.log(`task-board: menu bar launcher exited ${r.exitCode}`, { to: 'debug' })
+    const float = FLOAT_WINDOW ? floatArgv(root, TTL_SEC / 60, SHARED_DIR, DEVICE) : floatStopArgv(root)
+    if (float !== null) {
+      const f = await $.process.run(float)
+      if (f.exitCode !== 0) $.ui.log(`task-board: floating window launcher exited ${f.exitCode}`, { to: 'debug' })
+    }
   } catch (err) {
     menubarChecked = false
     $.ui.log(`task-board: menu bar launcher failed: ${String(err)}`, { to: 'debug' })
@@ -734,6 +746,7 @@ export const register: Register = (on, options) => {
   SHARED_DIR = typeof options?.sharedDir === 'string' ? options.sharedDir.trim() : DEFAULT_SHARED
   DEVICE = (typeof options?.deviceName === 'string' ? options.deviceName.trim() : '') || DEFAULT_DEVICE
   MENU_BAR = options?.menuBar !== false
+  FLOAT_WINDOW = options?.floatWindow !== false
   const nx = nextOptions(options)
 
   // 新一轮开始（打字或别的方式）就收起旧建议。

@@ -37,11 +37,25 @@ Interactions:
 The board lives above the prompt of a session, so you only see it while a session on this computer is open. The menu bar counter is always there: on the new-session page, while you read an old session, or while a Remote Control session from another computer is open.
 
 - A coloured count in the macOS menu bar: **yellow** = needs input, **blue** = running or waiting, **green** = done (the same sessions the board lists: finished within the last hour with the cache still warm, hidden ones left out). A grey dot when there is nothing.
+- At the bottom of that menu, **Floating window** shows or hides the floating window (see below).
 - Click it for the list: one row per session with a coloured dot, title, state, project and time; sessions from another computer carry its label. Click a row to switch to that session (one from another computer opens through Remote Control, as on the board).
 - It starts by itself when a session opens and keeps running after the session closes; only one runs at a time. It has no Quit item: switch **Menu bar counter** off in the settings to stop it.
 - It is a plain script run by the system's own `osascript` (`menubar.js`), reading the same scanner as the sessions, so nothing to build or install.
 
 If you cannot see it: on a MacBook with a notch, a crowded menu bar hides the leftmost icons behind the notch (look on an external display, or ⌘-drag other icons out); and in **System Settings › Menu Bar**, allow **osascript** in the menu bar.
+
+## Floating window
+
+The desktop app and claude.ai/code do not draw the board while you view another computer's session over Remote Control (only the phone app does). The floating window is a small separate window that is always there, whatever the desktop app is showing.
+
+- A narrow always-on-top window, one column of cards, **grouped by computer**: this computer first (Apple logo, `this computer`), then one group per other computer (a Windows logo for a Windows PC, `remote`). Each group header counts its sessions by state, in the same colours as the menu bar counter.
+- A running session's card has its title, progress (`2/5 · 3 min`), the step it is on, and a progress line; a finished one is a single line with how long ago it finished. A card that needs input has a yellow border.
+- Click a card to switch to that session (one from another computer opens through Remote Control). The card sinks under the pointer while pressed; releasing somewhere else cancels.
+- Drag the title bar to move it and drag an edge to resize it. Until you resize it, its height follows the content; after that it keeps your size and scrolls when the cards do not fit. Position and size are remembered.
+- It shows on every desktop and over full-screen apps, and never takes the keyboard focus.
+- It starts by itself when a session opens, and quits two minutes after the Claude desktop app is closed.
+- **Do not want it? Click its close button.** It stays hidden, also for later sessions, until you tick **Floating window** in the menu bar counter's menu. To switch it off for good, turn **Floating window** off in the settings (see [Settings](#settings)); turning that off and on again also brings back a hidden window.
+- Like the menu bar counter it is a plain script run by the system's own `osascript` (`floatwin.js`), so nothing to build or install.
 
 ## See sessions from your other computers
 
@@ -151,6 +165,7 @@ Run `/plugin configure task-board@unopot-mac-mods` in Claude Code:
 | Shared folder for other computers | `~/Library/Mobile Documents/com~apple~CloudDocs/Claude Code/task-board-shared` | a folder in a synced drive, same on every computer (see above); empty = this computer only |
 | This computer's label | Mac | the grey tag shown on this computer's cards elsewhere, and its file name in the shared folder; unique per computer |
 | Menu bar counter | on | the coloured counter in the macOS menu bar (see above); off stops it |
+| Floating window | on | the always-on-top window listing every session (see above); off stops it and removes its item from the menu bar counter's menu. To only hide it, use its close button instead |
 
 ## How it works and what it touches
 
@@ -158,6 +173,7 @@ Run `/plugin configure task-board@unopot-mac-mods` in Claude Code:
 - A session marks itself as *needs input* when it raises a permission dialog, `AskUserQuestion` or an MCP form, and clears the mark when the call finishes or the turn ends. The scanner also reads it from the transcript: an unanswered `AskUserQuestion`, `ExitPlanMode` or session offer card. A background command, subagent or workflow counts as running until its completion notice arrives or `TaskStop` stops it (at most 6 hours). The task list comes from TaskCreate / TaskUpdate, TodoWrite, or the desktop app's own task list.
 - It writes four small things under `~/.claude`: `task-board-prefs.json` (switch and hidden sessions), `task-board-usage.json` (latest usage reading, shared between sessions), `task-board-snapshot.json` (the latest scan, so a new session shows the board at once) and the folder `task-board-input/` (the needs-input marks). With sharing on it also writes `<label>.json` into the shared folder. Delete them after uninstalling if you like.
 - The menu bar counter is started by `menubar.pl` (detached from the session, one at a time, pid in `~/.claude/task-board-menubar.pid`). When no scanner is leading it starts `scan.pl` with `--latest ~/.claude/task-board-menubar.json` and reads that file every 2 seconds; otherwise it reads the leader's output file. When its plugin version is removed (after an update) it quits, and the next session starts the new one.
+- The floating window is started by the same `menubar.pl` (pid in `~/.claude/task-board-floatwin.pid`) and gets its data the same way (`--latest ~/.claude/task-board-floatwin-data.json` when no scanner is leading). Its position and size are in `~/.claude/task-board-floatwin.json`; `task-board-floatwin.hidden` marks it as hidden by you and `task-board-floatwin.off` as switched off in the settings. It quits when its plugin version is removed, when a newer one starts, or two minutes after the Claude desktop app has gone.
 - Clicking a card runs `open claude://…`, which brings the desktop app to that session: `claude://claude.ai/epitaxy/local_…` for a session on this computer, `claude://claude.ai/code/session_…` (Remote Control) for one on another computer.
 
 ## Known limitations
@@ -177,7 +193,7 @@ claude plugin uninstall task-board@unopot-mac-mods
 claude plugin marketplace remove unopot-mac-mods
 ```
 
-Uninstalling leaves a running menu bar counter until it notices its files are gone (a few seconds).
+Uninstalling leaves a running menu bar counter and floating window until they notice their files are gone (a few seconds).
 
 ## Development
 

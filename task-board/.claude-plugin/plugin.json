@@ -1,6 +1,6 @@
 {
   "name": "task-board",
-  "version": "2.6.4",
+  "version": "2.7.0",
   "author": {
     "name": "unopot"
   },
@@ -46,6 +46,13 @@
       "type": "boolean",
       "title": "Menu bar counter",
       "description": "Keep a coloured counter in the macOS menu bar (yellow = needs input, blue = running, green = done); click it for the sessions and click one to switch to it. Works outside any session. Off = stop it.",
+      "required": false,
+      "default": true
+    },
+    "floatWindow": {
+      "type": "boolean",
+      "title": "Floating window",
+      "description": "Keep a small always-on-top window that lists every session, grouped by computer; click a card to switch to it. Works outside any session, including while you view another computer's session over Remote Control. Drag its edges to resize; its close button hides it until you tick Floating window in the menu bar counter's menu. Off = stop it.",
       "required": false,
       "default": true
     },
